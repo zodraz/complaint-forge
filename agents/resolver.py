@@ -1,9 +1,9 @@
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.system_prompts import RESOLVER_PROMPT
+from llm_factory import get_chat_llm
 import json
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = get_chat_llm(temperature=0)
 
 def resolver(state: dict) -> dict:
     """
@@ -29,10 +29,5 @@ def resolver(state: dict) -> dict:
         "history": json.dumps(state.get("customer_history", {}), indent=2),
         "analysis": json.dumps(state.get("analysis", {}), indent=2)
     })
-    
-    # Safety guardrail
-    if result.get("confidence", 0) < 0.85 or result.get("refund_amount", 0) > 500:
-        result["resolution_type"] = "escalate"
-        result["action_needed"] = "High value or low confidence - escalate to human team"
     
     return {"resolution": result}

@@ -15,7 +15,12 @@ os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "complaintforge
 checkpointer = MemorySaver()
 
 # ========================== IMPORT AGENTS ==========================
-from agents.coordinator import coordinator
+from agents.triage import triage
+from nodes.customer_context import customer_context
+from nodes.policy import policy
+from nodes.guardrails import guardrails
+from nodes.human_review import human_review
+from nodes.ignored import ignored
 from agents.analyzer import analyzer
 from agents.resolver import resolver
 from agents.responder import responder
@@ -23,18 +28,27 @@ from agents.action_agent import action_agent
 
 class ComplaintState(TypedDict):
     complaint: str
+    triage: dict
     customer_email: str | None
+    order_id: str | None
     customer_history: dict
+    customer_context_result: dict
     analysis: dict
     resolution: dict
+    policy_result: dict
     response_draft: str
-    actions_taken: list
+    actions_taken: Annotated[list, operator.add]
+    eval_results: dict
+    human_review: dict
     final_response: str
     messages: Annotated[list, operator.add]
 
 # ========================== NODES ==========================
-def coordinator_node(state: ComplaintState):
-    return coordinator(state)
+def triage_node(state: ComplaintState):
+    return triage(state)
+
+def customer_context_node(state: ComplaintState):
+    return customer_context(state)
 
 def analyzer_node(state: ComplaintState):
     return analyzer(state)
@@ -42,32 +56,90 @@ def analyzer_node(state: ComplaintState):
 def resolver_node(state: ComplaintState):
     return resolver(state)
 
+def policy_node(state: ComplaintState):
+    return policy(dict(state))
+
 def responder_node(state: ComplaintState):
     return responder(state)
+
+async def guardrails_node(state: ComplaintState):
+    return await guardrails(dict(state))
 
 def action_node(state: ComplaintState):
     return action_agent(state)
 
+def human_review_node(state: ComplaintState):
+    return human_review(state)
+
+def route_after_resolver(state: ComplaintState):
+    if state.get("resolution", {}).get("resolution_type") == "escalate":
+        return "human_review"
+    return "responder"
+
+def route_after_guardrails(state: ComplaintState):
+    if state.get("resolution", {}).get("resolution_type") == "escalate":
+        return "human_review"
+    return "action"
+
+def route_after_triage(state: ComplaintState):
+    triage_result = state.get("triage", {})
+    if triage_result.get("is_complaint") is True:
+        return "customer_context"
+    return "ignored"
+
+def ignored_node(state: ComplaintState):
+    return ignored(state)
+
 # ========================== BUILD GRAPH ==========================
 workflow = StateGraph(ComplaintState)
 
-workflow.add_node("coordinator", coordinator_node)
+workflow.add_node("triage", triage_node)
+workflow.add_node("customer_context", customer_context_node)
 workflow.add_node("analyzer", analyzer_node)
 workflow.add_node("resolver", resolver_node)
+workflow.add_node("policy", policy_node)
 workflow.add_node("responder", responder_node)
+workflow.add_node("guardrails", guardrails_node)
 workflow.add_node("action", action_node)
+workflow.add_node("human_review", human_review_node)
+workflow.add_node("ignored", ignored_node)
 
-workflow.set_entry_point("coordinator")
+workflow.set_entry_point("triage")
 
-# Analysis must complete before resolution, because the resolver consumes the
-# analyzer output when applying policy.
-workflow.add_edge("coordinator", "analyzer")
+workflow.add_conditional_edges(
+    "triage",
+    route_after_triage,
+    {
+        "customer_context": "customer_context",
+        "ignored": "ignored",
+    },
+)
+workflow.add_edge("customer_context", "analyzer")
 workflow.add_edge("analyzer", "resolver")
+workflow.add_edge("resolver", "policy")
 
-workflow.add_edge("responder", END)
+workflow.add_conditional_edges(
+    "policy",
+    route_after_resolver,
+    {
+        "human_review": "human_review",
+        "responder": "responder",
+    },
+)
+
+workflow.add_edge("responder", "guardrails")
+workflow.add_conditional_edges(
+    "guardrails",
+    route_after_guardrails,
+    {
+        "human_review": "human_review",
+        "action": "action",
+    },
+)
+
 workflow.add_edge("action", END)
-workflow.add_edge("resolver", "responder")
-workflow.add_edge("resolver", "action")
+workflow.add_edge("human_review", END)
+workflow.add_edge("ignored", END)
 
 # Compile with tracing + checkpointing
 app = workflow.compile(checkpointer=checkpointer)

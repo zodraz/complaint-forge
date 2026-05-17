@@ -1,6 +1,7 @@
 from langsmith.schemas import Example, Run
 from typing import Dict, Any
 import json
+from llm_factory import get_chat_llm
 
 # ====================== CUSTOM EVALUATORS ======================
 
@@ -23,42 +24,13 @@ Return only a JSON:
 {{"score": 8.5, "reasoning": "short explanation"}}"""
 
     # You can use the same LLM used in your agents
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = get_chat_llm(temperature=0)
     
     result = llm.invoke(prompt).content
     try:
         return json.loads(result)
     except:
         return {"score": 7.0, "reasoning": "Could not parse evaluator output"}
-
-
-def evaluate_policy_compliance(run: Run, example: Example) -> Dict[str, Any]:
-    """Check if resolution follows company policy"""
-    resolution = run.outputs.get("resolution", {})
-    resolution_type = resolution.get("resolution_type")
-    refund_amount = resolution.get("refund_amount", 0)
-    
-    prompt = f"""Does this resolution follow the STRICT company policy?
-
-Resolution: {resolution_type} | Refund: ${refund_amount}
-
-Policy:
-- First-time < $150 -> max 50% refund
-- Repeat or >$150 -> full refund + credit allowed
-- Never refund digital/custom orders
-
-Return JSON:
-{{"compliant": true, "reasoning": "explanation", "score": 10}}"""
-
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-    result = llm.invoke(prompt).content
-    
-    try:
-        return json.loads(result)
-    except:
-        return {"compliant": False, "reasoning": "Evaluation failed", "score": 5}
 
 
 def evaluate_resolution_appropriateness(run: Run, example: Example) -> Dict[str, Any]:
@@ -74,8 +46,7 @@ Chosen Resolution: {resolution}
 Return JSON:
 {{"score": 9, "reasoning": "..."}}"""
 
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = get_chat_llm(temperature=0)
     result = llm.invoke(prompt).content
     try:
         return json.loads(result)
@@ -87,23 +58,18 @@ Return JSON:
 
 CUSTOM_EVALUATORS = {
     "empathy_score": evaluate_response_empathy,
-    "policy_compliance": evaluate_policy_compliance,
     "resolution_appropriateness": evaluate_resolution_appropriateness,
 }
 
 
 def apply_guardrails(eval_results: Dict[str, Dict[str, Any]]) -> tuple[bool, str, Dict[str, Any]]:
     empathy = eval_results.get("empathy_score", {})
-    policy = eval_results.get("policy_compliance", {})
     resolution = eval_results.get("resolution_appropriateness", {})
 
     failures = []
 
     if empathy.get("score", 0) < 6:
         failures.append("Response empathy score below threshold")
-
-    if not policy.get("compliant", False) or policy.get("score", 0) < 7:
-        failures.append("Resolution failed policy compliance")
 
     if resolution.get("score", 0) < 6:
         failures.append("Resolution appropriateness score below threshold")

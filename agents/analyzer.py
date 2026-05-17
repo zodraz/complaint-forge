@@ -1,9 +1,9 @@
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.system_prompts import ANALYZER_PROMPT
+from llm_factory import get_chat_llm
 import json
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = get_chat_llm(temperature=0)
 
 def analyzer(state: dict) -> dict:
     prompt = ChatPromptTemplate.from_template(ANALYZER_PROMPT)

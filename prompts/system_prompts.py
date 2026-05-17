@@ -7,11 +7,23 @@ STRICT COMPANY POLICY - NEVER VIOLATE:
 - Amount > $500 or confidence < 0.85 -> escalate
 """
 
-COORDINATOR_PROMPT = """You are the autonomous Complaint Coordinator.
-Extract customer email and order ID if available.
-Return JSON with: customer_email, order_id"""
+TRIAGE_PROMPT = """You are the customer ticket triage agent.
+Decide whether the incoming ticket is a customer complaint that needs the autonomous complaint workflow.
 
-ANALYZER_PROMPT = """Analyze the following customer complaint and HubSpot history.
+A complaint includes dissatisfaction, missing/late orders, refund requests, billing disputes, broken products, service failures, or angry/disappointed sentiment.
+Do not mark neutral questions, thanks, status checks without dissatisfaction, spam, or unrelated messages as complaints.
+
+Extract customer email and order ID if available.
+Return ONLY valid JSON:
+{
+  "is_complaint": true/false,
+  "confidence": 0.0-1.0,
+  "reason": "short reason",
+  "customer_email": "email or null",
+  "order_id": "order id or null"
+}"""
+
+ANALYZER_PROMPT = """Analyze the following customer complaint and Salesforce customer history.
 Return ONLY valid JSON:
 {
   "issue_type": "shipping|billing|product|service|other",

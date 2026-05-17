@@ -16,7 +16,11 @@ async def handle_complaint(complaint_text: str):
     print("\nFinal Response to Customer:\n")
     print(result.get("final_response", "No response generated"))
     print("\nActions Taken:", result.get("actions_taken", []))
-    print("\nHubSpot History Used:", result.get("customer_history", {}).get("total_tickets", 0), "previous tickets")
+    print(
+        "\nSalesforce History Used:",
+        result.get("customer_history", {}).get("total_recent_cases", 0),
+        "recent cases",
+    )
     
     return result
 

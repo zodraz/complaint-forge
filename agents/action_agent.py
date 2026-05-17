@@ -1,20 +1,8 @@
-from tools.stripe_tool import process_refund
-
-def _find_charge_id(history: dict) -> str | None:
-    if not isinstance(history, dict):
-        return None
-
-    for key in ("charge_id", "stripe_charge_id"):
-        if history.get(key):
-            return history[key]
-
-    for deal in history.get("deals", []):
-        properties = deal.get("properties", {}) if isinstance(deal, dict) else {}
-        for key in ("charge_id", "stripe_charge_id"):
-            if properties.get(key):
-                return properties[key]
-
-    return None
+from tools.salesforce_tool import (
+    create_replacement_order,
+    issue_credit,
+    process_refund,
+)
 
 def action_agent(state: dict) -> dict:
     """
@@ -28,20 +16,14 @@ def action_agent(state: dict) -> dict:
     
     # Execute refund if needed
     if resolution_type in ["full_refund", "partial_refund"] and refund_amount > 0:
-        charge_id = _find_charge_id(state.get("customer_history", {}))
-        if charge_id:
-            refund_result = process_refund(
-                charge_id=charge_id,
-                amount=int(refund_amount * 100)  # convert to cents
-            )
-        else:
-            refund_result = {
-                "status": "skipped",
-                "message": "No Stripe charge ID found in customer history"
-            }
+        refund_result = process_refund(
+            customer_history=state.get("customer_history", {}),
+            amount=refund_amount,
+            reason=resolution.get("action_needed"),
+        )
 
         actions_taken.append({
-            "action": "refund",
+            "action": "create_salesforce_refund_case",
             "amount": refund_amount,
             "result": refund_result
         })
@@ -49,16 +31,20 @@ def action_agent(state: dict) -> dict:
     # Credit action (simulate)
     if resolution.get("credit_amount", 0) > 0:
         actions_taken.append({
-            "action": "issue_credit",
+            "action": "create_salesforce_credit_case",
             "amount": resolution["credit_amount"],
-            "status": "success"
+            "result": issue_credit(
+                customer_history=state.get("customer_history", {}),
+                amount=resolution["credit_amount"],
+                reason=resolution.get("action_needed"),
+            )
         })
     
     # Replacement action
     if resolution_type == "replacement":
         actions_taken.append({
-            "action": "create_replacement_order",
-            "status": "success"
+            "action": "create_salesforce_replacement_case",
+            "result": create_replacement_order(state.get("customer_history", {}))
         })
     
     # Log escalation

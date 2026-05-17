@@ -1,8 +1,8 @@
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.system_prompts import RESPONDER_PROMPT
+from llm_factory import get_chat_llm
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.3)  # slight creativity for tone
+llm = get_chat_llm(temperature=0.3)  # slight creativity for tone
 
 def responder(state: dict) -> dict:
     """
