@@ -10,6 +10,7 @@ load_dotenv()
 
 # ========================== IMPORTS ==========================
 from graph import app as complaint_graph
+from tools.zendesk_mcp_tool import update_ticket_status_via_mcp
 
 review_runs: dict[str, dict] = {}
 
@@ -65,6 +66,34 @@ def _record_run(thread_id: str, **updates) -> None:
     current.update(updates)
 
 
+async def _finalize_completed_workflow(
+    *,
+    thread_id: str,
+    ticket_id: int | None,
+    result: dict,
+) -> dict:
+    if not ticket_id:
+        zendesk_result = {
+            "status": "skipped",
+            "reason": "No Zendesk ticket_id available",
+        }
+    else:
+        zendesk_result = await update_ticket_status_via_mcp(
+            ticket_id=ticket_id,
+            workflow_result=result,
+            comment="ComplaintForge workflow completed.",
+        )
+
+    result["zendesk_update"] = zendesk_result
+    _record_run(
+        thread_id,
+        status="completed",
+        result=result,
+        zendesk_update=zendesk_result,
+    )
+    return result
+
+
 # ========================== BACKGROUND PROCESSOR ==========================
 @traceable(run_type="chain", name="Autonomous Complaint Handler")
 async def process_complaint_async(
@@ -107,7 +136,11 @@ async def process_complaint_async(
                 "interrupts": interrupts,
             }
         
-        _record_run(thread_id, status="completed", result=result)
+        result = await _finalize_completed_workflow(
+            thread_id=thread_id,
+            ticket_id=ticket_id,
+            result=result,
+        )
         
         print(f"Ticket #{ticket_id} processed successfully")
         return {"status": "completed", "thread_id": thread_id, "result": result}
@@ -227,7 +260,12 @@ async def resume_review(thread_id: str, review: HumanReviewResume):
             "interrupts": interrupts,
         }
 
-    _record_run(thread_id, status="completed", result=result)
+    ticket_id = review_runs.get(thread_id, {}).get("ticket_id")
+    result = await _finalize_completed_workflow(
+        thread_id=thread_id,
+        ticket_id=ticket_id,
+        result=result,
+    )
     return {
         "status": "completed",
         "thread_id": thread_id,
