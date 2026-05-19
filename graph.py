@@ -19,6 +19,7 @@ from agents.triage import triage
 from nodes.customer_context import customer_context
 from nodes.policy import policy
 from nodes.guardrails import guardrails
+from nodes.specialist_review import specialist_review
 from nodes.human_review import human_review
 from nodes.ignored import ignored
 from agents.analyzer import analyzer
@@ -39,6 +40,7 @@ class ComplaintState(TypedDict):
     response_draft: str
     actions_taken: Annotated[list, operator.add]
     eval_results: dict
+    specialist_review: dict
     human_review: dict
     final_response: str
     messages: Annotated[list, operator.add]
@@ -68,17 +70,20 @@ async def guardrails_node(state: ComplaintState):
 def action_node(state: ComplaintState):
     return action_agent(state)
 
+def specialist_review_node(state: ComplaintState):
+    return specialist_review(dict(state))
+
 def human_review_node(state: ComplaintState):
     return human_review(state)
 
 def route_after_resolver(state: ComplaintState):
     if state.get("resolution", {}).get("resolution_type") == "escalate":
-        return "human_review"
+        return "specialist_review"
     return "responder"
 
 def route_after_guardrails(state: ComplaintState):
     if state.get("resolution", {}).get("resolution_type") == "escalate":
-        return "human_review"
+        return "specialist_review"
     return "action"
 
 def route_after_triage(state: ComplaintState):
@@ -101,6 +106,7 @@ workflow.add_node("policy", policy_node)
 workflow.add_node("responder", responder_node)
 workflow.add_node("guardrails", guardrails_node)
 workflow.add_node("action", action_node)
+workflow.add_node("specialist_review", specialist_review_node)
 workflow.add_node("human_review", human_review_node)
 workflow.add_node("ignored", ignored_node)
 
@@ -122,7 +128,7 @@ workflow.add_conditional_edges(
     "policy",
     route_after_resolver,
     {
-        "human_review": "human_review",
+        "specialist_review": "specialist_review",
         "responder": "responder",
     },
 )
@@ -132,12 +138,13 @@ workflow.add_conditional_edges(
     "guardrails",
     route_after_guardrails,
     {
-        "human_review": "human_review",
+        "specialist_review": "specialist_review",
         "action": "action",
     },
 )
 
 workflow.add_edge("action", END)
+workflow.add_edge("specialist_review", "human_review")
 workflow.add_edge("human_review", END)
 workflow.add_edge("ignored", END)
 

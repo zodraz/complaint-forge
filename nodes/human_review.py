@@ -11,6 +11,7 @@ def human_review(state: dict) -> dict:
         "customer_history": state.get("customer_history", {}),
         "analysis": state.get("analysis", {}),
         "resolution": resolution,
+        "specialist_review": state.get("specialist_review", {}),
     })
 
     final_response = None
