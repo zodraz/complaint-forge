@@ -15,6 +15,35 @@ from config import (
 )
 
 
+def _salesforce_error_message(response: requests.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        body = response.text.strip()
+        return body[:500] if body else "No response body"
+
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        description = payload.get("error_description")
+        if error and description:
+            return f"{error}: {description}"
+        if error:
+            return str(error)
+        return str(payload)
+
+    return str(payload)
+
+
+def _raise_for_status(response: requests.Response, *, context: str) -> None:
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        detail = _salesforce_error_message(response)
+        raise RuntimeError(
+            f"Salesforce {context} failed with HTTP {response.status_code}: {detail}"
+        ) from exc
+
+
 def _missing_config() -> list[str]:
     return [
         name
@@ -41,7 +70,7 @@ def _get_access_token() -> tuple[str, str]:
         },
         timeout=30,
     )
-    response.raise_for_status()
+    _raise_for_status(response, context="OAuth token request")
     payload = response.json()
     return payload["access_token"], payload["instance_url"].rstrip("/")
 
@@ -64,7 +93,7 @@ def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         timeout=30,
         **kwargs,
     )
-    response.raise_for_status()
+    _raise_for_status(response, context=f"{method} {path}")
     if response.status_code == 204 or not response.content:
         return {}
     return response.json()
@@ -157,7 +186,7 @@ def _recent_return_orders(
         return []
 
     return _query(
-        "SELECT Id, Name, CreatedDate, LastModifiedDate "
+        "SELECT Id, OrderId,CreatedDate, LastModifiedDate "
         f"FROM {_salesforce_identifier(SALESFORCE_RETURN_ORDER_OBJECT)} "
         f"WHERE {' OR '.join(filters)} "
         "ORDER BY CreatedDate DESC LIMIT 5"

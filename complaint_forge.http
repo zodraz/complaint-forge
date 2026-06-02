@@ -1,0 +1,78 @@
+@baseUrl = http://localhost:8000
+@threadId = paste-thread-id-here
+
+### Health check
+GET {{baseUrl}}/health
+
+
+### Zendesk complaint webhook - accepted and processed in background
+POST {{baseUrl}}/webhook/zendesk/complaint
+Content-Type: application/json
+
+{
+  "ticket": {
+    "id": 12345,
+    "subject": "Order never arrived",
+    "description": "My order #ORD-98765 never arrived. I am extremely upset and want a refund. Email: ada@gmail.com",
+    "requester": {
+      "email": "ada@example.com"
+    }
+  }
+}
+
+
+### Test complaint endpoint - runs synchronously and returns completed/pending result
+POST {{baseUrl}}/test/complaint
+Content-Type: application/json
+
+{
+  "email": "ada@example.com",
+  "complaint": "My order #ORD-98765 never arrived. I am extremely upset and want a refund."
+}
+
+
+### Non-complaint ticket - triage should ignore
+POST {{baseUrl}}/test/complaint
+Content-Type: application/json
+
+{
+  "email": "ada@example.com",
+  "complaint": "Thanks for the update. No problem from my side."
+}
+
+
+### List pending human reviews
+GET {{baseUrl}}/review
+
+
+### Get a specific pending human review
+GET {{baseUrl}}/review/{{threadId}}
+
+
+### Resume human review
+POST {{baseUrl}}/review/{{threadId}}/resume
+Content-Type: application/json
+
+{
+  "approved": true,
+  "notes": "Reviewed and approved by support lead.",
+  "final_response": "Thanks for contacting us. Our support team reviewed your case and will follow up directly with the next steps."
+}
+
+
+### Resume human review with adjusted resolution
+POST {{baseUrl}}/review/{{threadId}}/resume
+Content-Type: application/json
+
+{
+  "approved": true,
+  "notes": "Approved partial refund after reviewing Salesforce history and specialist recommendation.",
+  "resolution": {
+    "resolution_type": "partial_refund",
+    "refund_amount": 75,
+    "credit_amount": 0,
+    "action_needed": "Create refund workflow case in Salesforce",
+    "confidence": 0.95
+  },
+  "final_response": "Thanks for your patience. We reviewed your case and approved a partial refund. Our support team will follow up with confirmation shortly."
+}

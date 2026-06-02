@@ -14,24 +14,33 @@ A complaint includes dissatisfaction, missing/late orders, refund requests, bill
 Do not mark neutral questions, thanks, status checks without dissatisfaction, spam, or unrelated messages as complaints.
 
 Extract customer email and order ID if available.
+Ticket:
+{input}
+
 Return ONLY valid JSON:
-{
+{{
   "is_complaint": true/false,
   "confidence": 0.0-1.0,
   "reason": "short reason",
   "customer_email": "email or null",
   "order_id": "order id or null"
-}"""
+}}"""
 
 ANALYZER_PROMPT = """Analyze the following customer complaint and Salesforce customer history.
+Complaint:
+{complaint}
+
+Salesforce customer history:
+{history}
+
 Return ONLY valid JSON:
-{
+{{
   "issue_type": "shipping|billing|product|service|other",
   "sentiment": "positive|neutral|negative|very_negative",
   "urgency": "low|medium|high",
   "repeat_complaint": true/false,
   "key_details": "short summary"
-}"""
+}}"""
 
 RESOLVER_PROMPT = f"""You are the Resolver Agent.
 {POLICY_RULES}

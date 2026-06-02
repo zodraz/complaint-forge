@@ -1,0 +1,85 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "ComplaintForge API",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "main_fastapi:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000",
+                "--reload"
+            ],
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "console": "integratedTerminal",
+            "jinja": true,
+            "justMyCode": false
+        },
+        {
+            "name": "A2A Refund Specialist",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "app:app",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8010",
+                "--reload"
+            ],
+            "cwd": "${workspaceFolder}/a2a_refund_specialist_service",
+            "envFile": "${workspaceFolder}/a2a_refund_specialist_service/.env",
+            "console": "integratedTerminal",
+            "jinja": true,
+            "justMyCode": false
+        },
+        {
+            "name": "Run Unit Tests",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "unittest",
+            "args": [
+                "discover",
+                "-s",
+                "tests",
+                "-v"
+            ],
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "PYTHONDONTWRITEBYTECODE": "1"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Run Current Python File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "cwd": "${workspaceFolder}",
+            "envFile": "${workspaceFolder}/.env",
+            "env": {
+                "PYTHONDONTWRITEBYTECODE": "1"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ],
+    "compounds": [
+        {
+            "name": "API + A2A Specialist",
+            "configurations": [
+                "ComplaintForge API",
+                "A2A Refund Specialist"
+            ],
+            "stopAll": true
+        }
+    ]
+}
