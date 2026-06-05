@@ -1,20 +1,38 @@
 from types import SimpleNamespace
 from typing import Any
 
-from evaluators import CUSTOM_EVALUATORS, apply_guardrails
+from response_evaluators import RESPONSE_QUALITY_EVALUATORS
+
+
+def apply_guardrails(eval_results: dict[str, dict[str, Any]]) -> tuple[bool, str, dict[str, Any]]:
+    empathy = eval_results.get("empathy_score", {})
+    resolution = eval_results.get("resolution_appropriateness", {})
+
+    failures = []
+
+    if empathy.get("score", 0) < 6:
+        failures.append("Response empathy score below threshold")
+
+    if resolution.get("score", 0) < 6:
+        failures.append("Resolution appropriateness score below threshold")
+
+    if failures:
+        return False, "; ".join(failures), eval_results
+
+    return True, "All response quality guardrails passed", eval_results
 
 
 async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
     """
-    Run evaluator guardrails after the response draft and before external actions.
+    Run response quality guardrails after the response draft and before external actions.
     """
     result = dict(state)
     complaint_text = state.get("complaint", "")
 
-    print("Running LangSmith evaluators...")
+    print("Running response quality evaluators...")
     eval_results = {}
 
-    for eval_name, evaluator_func in CUSTOM_EVALUATORS.items():
+    for eval_name, evaluator_func in RESPONSE_QUALITY_EVALUATORS.items():
         try:
             eval_output = evaluator_func(
                 SimpleNamespace(outputs=result),
