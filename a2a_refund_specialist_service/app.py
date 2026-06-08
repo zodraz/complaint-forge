@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 from typing import Any
 
 from dotenv import load_dotenv
@@ -69,11 +70,22 @@ def _extract_json(raw: str) -> dict[str, Any]:
     return json.loads(raw)
 
 
-def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
+def _crewai_import_failure_reason(error: Exception) -> str:
+    reason = f"CrewAI import failed: {error}"
+    if sys.version_info >= (3, 14):
+        version = ".".join(map(str, sys.version_info[:3]))
+        reason += (
+            f". Current Python is {version}, but CrewAI releases currently require "
+            "Python >=3.10,<3.14. Run this service with Python 3.13 or earlier."
+        )
+    return reason
+
+
+async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
     try:
         from crewai import Agent, Crew, Process, Task
     except Exception as e:
-        return _fallback_recommendation(f"CrewAI import failed: {e}")
+        return _fallback_recommendation(_crewai_import_failure_reason(e))
 
     specialist = Agent(
         role="Refund and Escalation Specialist",
@@ -113,7 +125,7 @@ def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
     )
 
     try:
-        output = crew.kickoff()
+        output = await crew.kickoff_async()
         raw = getattr(output, "raw", str(output))
         return {
             "status": "success",
@@ -146,7 +158,7 @@ async def refund_specialist(
     authorization: str | None = Header(default=None),
 ):
     _authorize(authorization)
-    return run_crewai_review(request)
+    return await run_crewai_review(request)
 
 
 @app.get("/health")

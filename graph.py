@@ -8,8 +8,18 @@ import os
 load_dotenv()
 
 # ========================== LANGCHAIN / LANGSMITH SETUP ==========================
-os.environ["LANGCHAIN_TRACING_V2"] = "true"
-os.environ["LANGCHAIN_PROJECT"] = os.getenv("LANGCHAIN_PROJECT", "complaintforge-complaint-handler")
+_tracing_enabled = (
+    os.getenv("LANGSMITH_TRACING")
+    or os.getenv("LANGCHAIN_TRACING_V2")
+    or "false"
+).lower() in {"1", "true", "yes", "on"}
+os.environ["LANGCHAIN_TRACING_V2"] = "true" if _tracing_enabled else "false"
+os.environ["LANGSMITH_TRACING"] = "true" if _tracing_enabled else "false"
+os.environ["LANGCHAIN_PROJECT"] = (
+    os.getenv("LANGCHAIN_PROJECT")
+    or os.getenv("LANGSMITH_PROJECT")
+    or "complaintforge-complaint-handler"
+)
 
 # Optional: Use persistent checkpointing (recommended for production)
 checkpointer = MemorySaver()
@@ -151,4 +161,4 @@ workflow.add_edge("ignored", END)
 # Compile with tracing + checkpointing
 app = workflow.compile(checkpointer=checkpointer)
 
-print("LangGraph compiled with LangSmith tracing enabled")
+print(f"LangGraph compiled with LangSmith tracing {'enabled' if _tracing_enabled else 'disabled'}")
