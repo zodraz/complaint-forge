@@ -25,6 +25,16 @@ A2A_SPECIALIST_URL=http://localhost:8010
 A2A_SPECIALIST_AUTH_TOKEN=optional-bearer-token
 ```
 
+Configure the A2A specialist service with the same Azure OpenAI settings used by
+the main app:
+
+```env
+AZURE_OPENAI_API_KEY=your-azure-openai-key
+AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/
+AZURE_OPENAI_DEPLOYMENT_NAME=your-deployment-name
+A2A_SPECIALIST_AUTH_TOKEN=optional-bearer-token
+```
+
 Useful endpoints:
 
 - `GET /.well-known/agent-card.json`

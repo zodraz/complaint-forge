@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from llm_factory import get_chat_llm
+
 load_dotenv()
 
 app = FastAPI(
@@ -87,42 +89,47 @@ async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
     except Exception as e:
         return _fallback_recommendation(_crewai_import_failure_reason(e))
 
-    specialist = Agent(
-        role="Refund and Escalation Specialist",
-        goal=(
-            "Review escalated complaint cases and prepare a concise, policy-aware "
-            "recommendation for a human approver."
-        ),
-        backstory=(
-            "You are a senior support operations specialist. You do not execute "
-            "refunds. You prepare evidence-based recommendations for humans."
-        ),
-        verbose=True,
-    )
+    try:
+        llm = get_chat_llm(temperature=1)
+        specialist = Agent(
+            role="Refund and Escalation Specialist",
+            goal=(
+                "Review escalated complaint cases and prepare a concise, policy-aware "
+                "recommendation for a human approver."
+            ),
+            backstory=(
+                "You are a senior support operations specialist. You do not execute "
+                "refunds. You prepare evidence-based recommendations for humans."
+            ),
+            llm=llm,
+            verbose=True,
+        )
 
-    task = Task(
-        description=(
-            "Review this escalated complaint package and return ONLY JSON.\n\n"
-            "Complaint package:\n"
-            f"{request.model_dump_json(indent=2)}\n\n"
-            "The JSON must include: decision, risk_level, approved, refund_amount, "
-            "credit_amount, reasoning, human_reviewer_notes, draft_response.\n"
-            "Use approved=false unless the evidence clearly supports automation. "
-            "This is advisory only; a human remains final authority."
-        ),
-        expected_output=(
-            "A JSON object with decision, risk_level, approved, refund_amount, "
-            "credit_amount, reasoning, human_reviewer_notes, and draft_response."
-        ),
-        agent=specialist,
-    )
+        task = Task(
+            description=(
+                "Review this escalated complaint package and return ONLY JSON.\n\n"
+                "Complaint package:\n"
+                f"{request.model_dump_json(indent=2)}\n\n"
+                "The JSON must include: decision, risk_level, approved, refund_amount, "
+                "credit_amount, reasoning, human_reviewer_notes, draft_response.\n"
+                "Use approved=false unless the evidence clearly supports automation. "
+                "This is advisory only; a human remains final authority."
+            ),
+            expected_output=(
+                "A JSON object with decision, risk_level, approved, refund_amount, "
+                "credit_amount, reasoning, human_reviewer_notes, and draft_response."
+            ),
+            agent=specialist,
+        )
 
-    crew = Crew(
-        agents=[specialist],
-        tasks=[task],
-        process=Process.sequential,
-        verbose=True,
-    )
+        crew = Crew(
+            agents=[specialist],
+            tasks=[task],
+            process=Process.sequential,
+            verbose=True,
+        )
+    except Exception as e:
+        return _fallback_recommendation(f"CrewAI setup failed: {e}")
 
     try:
         output = await crew.kickoff_async()
