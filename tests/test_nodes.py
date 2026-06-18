@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+import tools.a2a_specialist_tool as specialist_tool
 import nodes.human_review as human_review_node
 import nodes.specialist_review as specialist_review_node
 
@@ -24,6 +25,40 @@ class NodeTests(unittest.TestCase):
             "action": "a2a_specialist_review",
             "result": recommendation,
         }])
+
+    def test_specialist_review_handles_external_service_error(self):
+        error_response = {
+            "status": "error",
+            "message": "Service unavailable",
+        }
+
+        with patch.object(
+            specialist_review_node,
+            "request_specialist_review",
+            lambda state: error_response,
+        ):
+            result = specialist_review_node.specialist_review({"complaint": "Refund me"})
+
+        self.assertEqual(result["specialist_review"], error_response)
+        self.assertEqual(result["actions_taken"], [{
+            "action": "a2a_specialist_review",
+            "result": error_response,
+        }])
+
+    def test_specialist_review_outage_fallback_reached(self):
+        def fake_post(url, json, headers, timeout):
+            raise specialist_tool.requests.exceptions.ConnectionError("connection refused")
+
+        with (
+            patch.object(specialist_tool, "A2A_SPECIALIST_URL", "http://specialist"),
+            patch.object(specialist_tool.requests, "post", fake_post),
+            patch.object(specialist_tool.time, "sleep", lambda _: None),
+        ):
+            result = specialist_review_node.specialist_review({"complaint": "Refund me"})
+
+        self.assertEqual(result["specialist_review"]["status"], "error")
+        self.assertEqual(result["specialist_review"]["fallback"], "retry_exhausted")
+        self.assertEqual(result["actions_taken"][0]["action"], "a2a_specialist_review")
 
     def test_human_review_interrupt_payload_includes_specialist_review(self):
         captured = {}

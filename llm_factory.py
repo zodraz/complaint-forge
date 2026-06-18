@@ -14,7 +14,7 @@ def _azure_openai_base_url() -> str:
     return endpoint + "/openai/v1/"
 
 
-def get_chat_llm(*, temperature: float = 0) -> ChatOpenAI:
+def get_chat_llm(*, temperature: float = 0, request_timeout: float | None = None) -> ChatOpenAI:
     missing = [
         name
         for name, value in {
@@ -35,5 +35,7 @@ def get_chat_llm(*, temperature: float = 0) -> ChatOpenAI:
         "api_key": AZURE_OPENAI_API_KEY,
         "temperature": temperature,
     }
+    if request_timeout is not None:
+        kwargs["request_timeout"] = request_timeout
 
     return ChatOpenAI(**kwargs)

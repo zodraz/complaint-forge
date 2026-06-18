@@ -5,7 +5,7 @@ from llm_factory import get_chat_llm
 from prompts.system_prompts import TRIAGE_PROMPT
 
 
-llm = get_chat_llm(temperature=0)
+llm = get_chat_llm(temperature=0, request_timeout=20)
 
 
 class TriageResult(BaseModel):
@@ -19,7 +19,17 @@ class TriageResult(BaseModel):
 def triage(state: dict) -> dict:
     prompt = ChatPromptTemplate.from_template(TRIAGE_PROMPT)
     chain = prompt | llm.with_structured_output(TriageResult)
-    result = chain.invoke({"input": state["complaint"]}).model_dump()
+
+    try:
+        result = chain.invoke({"input": state["complaint"]}).model_dump()
+    except Exception as exc:
+        result = {
+            "is_complaint": False,
+            "confidence": 0.0,
+            "reason": f"LLM triage unavailable: {exc}",
+            "customer_email": None,
+            "order_id": None,
+        }
 
     return {
         "triage": result,

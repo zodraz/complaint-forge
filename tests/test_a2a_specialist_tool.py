@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import patch
 
+import requests
 import tools.a2a_specialist_tool as tool
 
 
@@ -59,6 +60,40 @@ class A2ASpecialistToolTests(unittest.TestCase):
         self.assertEqual(captured["timeout"], 60)
         self.assertEqual(captured["json"]["customer_email"], "ada@example.com")
         self.assertEqual(captured["json"]["resolution"]["resolution_type"], "escalate")
+
+    def test_request_specialist_review_retries_temporal_failures_then_succeeds(self):
+        captured = {"count": 0}
+
+        def fake_post(url, json, headers, timeout):
+            captured["count"] += 1
+            if captured["count"] == 1:
+                raise requests.exceptions.Timeout("connection timed out")
+            return DummyResponse({"status": "success", "recommendation": {"approved": False}})
+
+        with (
+            patch.object(tool, "A2A_SPECIALIST_URL", "http://specialist"),
+            patch.object(tool.requests, "post", fake_post),
+            patch.object(tool.time, "sleep", lambda _: None),
+        ):
+            result = tool.request_specialist_review({"complaint": "Refund me"})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(captured["count"], 2)
+
+    def test_request_specialist_review_returns_error_after_retries(self):
+        def fake_post(url, json, headers, timeout):
+            raise requests.exceptions.Timeout("connection timed out")
+
+        with (
+            patch.object(tool, "A2A_SPECIALIST_URL", "http://specialist"),
+            patch.object(tool.requests, "post", fake_post),
+            patch.object(tool.time, "sleep", lambda _: None),
+        ):
+            result = tool.request_specialist_review({"complaint": "Refund me"})
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["retry_attempts"], 3)
+        self.assertEqual(result["fallback"], "retry_exhausted")
 
 
 if __name__ == "__main__":
