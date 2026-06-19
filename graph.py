@@ -31,6 +31,7 @@ from nodes.policy import policy
 from nodes.guardrails import guardrails
 from nodes.specialist_review import specialist_review
 from nodes.human_review import human_review
+from nodes.outbound_communication import communication_node as communication_node_impl
 from nodes.ignored import ignored
 from agents.analyzer import analyzer
 from agents.resolver import resolver
@@ -80,6 +81,9 @@ async def guardrails_node(state: ComplaintState):
 def action_node(state: ComplaintState):
     return action_agent(state)
 
+def communication_node(state: ComplaintState):
+    return communication_node_impl(state)
+
 def specialist_review_node(state: ComplaintState):
     return specialist_review(dict(state))
 
@@ -116,6 +120,7 @@ workflow.add_node("policy", policy_node)
 workflow.add_node("responder", responder_node)
 workflow.add_node("guardrails", guardrails_node)
 workflow.add_node("action", action_node)
+workflow.add_node("communication", communication_node)
 workflow.add_node("specialist_review", specialist_review_node)
 workflow.add_node("human_review", human_review_node)
 workflow.add_node("ignored", ignored_node)
@@ -153,9 +158,10 @@ workflow.add_conditional_edges(
     },
 )
 
-workflow.add_edge("action", END)
+workflow.add_edge("action", "communication")
+workflow.add_edge("communication", END)
 workflow.add_edge("specialist_review", "human_review")
-workflow.add_edge("human_review", END)
+workflow.add_edge("human_review", "communication")
 workflow.add_edge("ignored", END)
 
 # Compile with tracing + checkpointing
