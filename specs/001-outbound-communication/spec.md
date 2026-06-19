@@ -4,7 +4,7 @@
 
 ## Summary
 
-Add outbound communication that delivers the final customer-facing response via email and falls back to SMS if the email delivery fails. The workflow should use SendGrid for sending email messages, and SMS should use a configurable provider.
+Add outbound communication that delivers the final customer-facing response via email and falls back to SMS if the email delivery fails. The workflow should use Mailchimp Transactional Email API for sending email messages, and SMS should use Mailchimp Transactional SMS API (same provider for both channels).
 
 ## Background
 
@@ -14,19 +14,19 @@ Resolver/responder produce the final response text and a resolution. This featur
 
 - System: complaint handling workflow
 - Outbound Communication: the new workflow component
-- External providers: SendGrid (email), configurable SMS provider
+- External providers: Mailchimp Transactional API (email and SMS via official SDK)
 - Human reviewer (for escalations)
 
 ## User Scenarios
 
 1. Successful email
    - Input: Responder produces final message and customer's email address
-   - Flow: Outbound communication sends email via SendGrid; provider returns success; update workflow with delivered status; no SMS sent.
+   - Flow: Outbound communication sends email via Mailchimp SDK; provider returns success; update workflow with delivered status; no SMS sent.
    - Acceptance: Customer receives email; system records delivery timestamp.
 
 2. Email fails, SMS fallback
    - Input: Responder produces final message, customer's email and phone
-   - Flow: SendGrid returns a permanent failure (or other failure condition); the node attempts SMS via configured provider; SMS succeeds; update workflow with delivered-via-SMS status and reason for email failure.
+   - Flow: Mailchimp returns a permanent failure (rejected status); the node attempts SMS via Mailchimp SDK; SMS succeeds; update workflow with delivered-via-SMS status and reason for email failure.
    - Acceptance: Customer receives SMS; system records both attempts and final status.
 
 3. Both channels fail
@@ -87,11 +87,11 @@ Resolver/responder produce the final response text and a resolution. This featur
 
 ## Decisions
 
-- **SMS provider**: Twilio (chosen). The node will use Twilio as the default SMS provider for fallback delivery unless overridden in configuration.
+- **SMS provider**: Mailchimp Transactional SMS API (chosen). The node will use Mailchimp as the default SMS provider for fallback delivery unless overridden in configuration.
 
-- **Email failure definition & retry policy**: A permanent bounce event from SendGrid (bounce) will be treated as a definitive email failure and will trigger immediate SMS fallback. No additional retries are attempted for other transient HTTP errors by default. These behaviors must be configurable.
+- **Email failure definition & retry policy**: A permanent bounce event from Mailchimp (bounce) will be treated as a definitive email failure and will trigger immediate SMS fallback. No additional retries are attempted for other transient HTTP errors by default. These behaviors must be configurable.
 
 ## Notes
 
-- SendGrid will be used for email; the node must use the existing `tools/` integration pattern and a new `tools/sendgrid_tool.py` client if one doesn't already exist.
- - SendGrid will be used for email; the node must integrate with SendGrid through a configurable provider client (implementation details such as file paths are out of scope for this spec).
+- Mailchimp Transactional API will be used for both email and SMS; the node must use the existing `tools/` integration pattern and a `tools/mailchimp_tool.py` client.
+- Mailchimp will be integrated through a configurable provider client (implementation details such as file paths are out of scope for this spec).

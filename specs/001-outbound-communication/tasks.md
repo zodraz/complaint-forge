@@ -9,7 +9,7 @@ description: "Tasks for Outbound Communication implementation"
 ## Phase 1: Setup & Test Infrastructure (FOUNDATIONAL)
 
 - [X] T001 Create test file: `tests/test_outbound_communication.py` with imports and base test class
-- [ ] T002 [P] Add test mocks for SendGrid and Twilio in `tests/mocks/sendgrid_mock.py` and `tests/mocks/twilio_mock.py`
+- [ ] T002 [P] Add test mocks for Mailchimp in `tests/mocks/mailchimp_mock.py` following SendGrid and Twilio mock patterns
 - [ ] T003 [P] Add test fixtures for sample `CommunicationPayload` and `DeliveryRecord` in `tests/fixtures/communication_fixtures.py`
 - [ ] T004 Configure coverage enforcement in `.coveragerc` and update `requirements.txt` with `coverage`
 - [ ] T005 Validate `.gitignore` excludes `__pycache__` and test artifacts
@@ -19,8 +19,8 @@ description: "Tasks for Outbound Communication implementation"
 ## Phase 2: Tests for Outbound Communication (MANDATORY - Write FIRST)
 
 - [X] T006 [P] Unit test: validate `CommunicationPayload` schema and missing-recipient validation in `tests/test_outbound_communication.py`
-- [X] T007 [P] Unit test: email send success path (mock SendGrid) in `tests/test_outbound_communication.py`
-- [X] T008 [P] Unit test: email permanent bounce handling triggers SMS fallback (mock SendGrid + Twilio)
+- [X] T007 [P] Unit test: email send success path (mock Mailchimp) in `tests/test_outbound_communication.py`
+- [X] T008 [P] Unit test: email permanent bounce handling triggers SMS fallback (mock Mailchimp for both channels)
 - [ ] T009 [P] Unit test: idempotence — repeated calls with same `correlation_id` do not duplicate sends
 - [ ] T010 [P] Unit test: audit logging writes `DeliveryAttempt` entries to workflow trace (mock trace storage)
 - [ ] T011 Integration test: end-to-end flow with mocked services — email success path results in `delivered_email` final_status
@@ -32,16 +32,16 @@ description: "Tasks for Outbound Communication implementation"
 
 ### Tools (external clients)
 
-- [X] T013 Create `tools/sendgrid_tool.py` with: `send_email(payload: CommunicationPayload) -> ProviderResponse` signature, timeout config, and retry scaffolding
-- [X] T014 [P] Create `tools/twilio_tool.py` with: `send_sms(to: str, message: str) -> ProviderResponse` signature, timeout config, and retry scaffolding
-- [X] T015 [P] Add required config entries to `config.py` and `.env.example`: `SENDGRID_API_KEY`, `SENDGRID_TIMEOUT`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`
+- [X] T013 Create `tools/mailchimp_tool.py` with: `send_email()` and `send_sms()` functions, timeout config, and retry scaffolding
+- [X] T014 [P] (Combined with T013) Both email and SMS use same Mailchimp tool
+- [X] T015 [P] Add required config entries to `config.py` and `.env.example`: `MAILCHIMP_API_KEY`, `MAILCHIMP_SERVER_PREFIX`, `MAILCHIMP_FROM_EMAIL`, `MAILCHIMP_TIMEOUT`
 
 ### Node Implementation
 
 - [X] T016 Create `nodes/outbound_communication.py` node with entry `def run(context, payload: CommunicationPayload) -> DeliveryRecord` and docstring
-- [X] T017 [P] Implement call to `tools/sendgrid_tool.send_email()` with proper request mapping and timeout handling
-- [X] T018 Implement SendGrid response classification: treat permanent bounces as permanent failures and trigger SMS fallback
-- [X] T019 [P] Implement SMS fallback using `tools.twilio_tool.send_sms()` when bounce detected and `recipient_phone` present
+- [X] T017 [P] Implement call to `tools/mailchimp_tool.send_email()` with proper request mapping and timeout handling
+- [X] T018 Implement Mailchimp response classification: treat permanent bounces as permanent failures and trigger SMS fallback
+- [X] T019 [P] Implement SMS fallback using `tools.mailchimp_tool.send_sms()` when bounce detected and `recipient_phone` present
 - [X] T020 Implement idempotence/dedup: check existing `DeliveryRecord` by `correlation_id` and skip duplicate sends
 - [ ] T021 [P] Implement audit logging: append `DeliveryAttempt` objects to the workflow trace and persist `DeliveryRecord` in-memory/trace
 - [X] T022 Add explicit error handling: on dual failure (email + SMS), emit human-review interrupt via existing `nodes/human_review.py` interrupt contract
@@ -87,8 +87,8 @@ description: "Tasks for Outbound Communication implementation"
 
 ## Independent Test Criteria (per User Story)
 
-- US1 (Email primary): Given a valid `recipient_email`, SendGrid returns success -> final_status `delivered_email` and one `DeliveryAttempt` with provider `sendgrid` recorded.
-- US2 (Email bounce -> SMS): Given a SendGrid permanent bounce and `recipient_phone` present -> final_status `delivered_sms` and attempts recorded for both providers.
+- US1 (Email primary): Given a valid `recipient_email`, Mailchimp returns success -> final_status `delivered_email` and one `DeliveryAttempt` with provider `mailchimp` recorded.
+- US2 (Email bounce -> SMS): Given a Mailchimp permanent bounce and `recipient_phone` present -> final_status `delivered_sms` and attempts recorded for both channels via same provider.
 - US3 (Both fail): Email bounce and SMS failure -> final_status `failed` and human-review interrupt emitted with payload containing attempts and trace.
 
 ## Suggested MVP Scope

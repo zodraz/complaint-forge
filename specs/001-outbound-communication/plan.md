@@ -8,7 +8,7 @@
 
 ## Summary
 
-Implement an `outbound-communication` node that delivers responder output to customers via email (SendGrid) and falls back to SMS (Twilio) on permanent SendGrid bounces. The node will be a `nodes/outbound_communication.py` deterministic node called from the workflow after `responder` and `policy` checks; it will record `DeliveryRecord` in the workflow trace and emit audit logs.
+Implement an `outbound-communication` node that delivers responder output to customers via email (Mailchimp Transactional API SDK) and falls back to SMS (Mailchimp Transactional SMS API SDK) on permanent Mailchimp rejection. The node will be a `nodes/outbound_communication.py` deterministic node called from the workflow after `responder` and `policy` checks; it will record `DeliveryRecord` in the workflow trace and emit audit logs.
 
 ## Technical Context
 

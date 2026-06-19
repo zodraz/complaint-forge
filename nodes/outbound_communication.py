@@ -4,8 +4,7 @@ from typing import Any
 
 from langgraph.types import interrupt
 from nodes.communication_models import CommunicationPayload, DeliveryAttempt, DeliveryRecord
-from tools.sendgrid_tool import send_email
-from tools.twilio_tool import send_sms
+from tools.mailchimp_tool import send_email, send_sms
 
 
 def _build_sms_message(payload: CommunicationPayload) -> str:
@@ -63,7 +62,7 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
         _record_attempt(
             record,
             channel="email",
-            provider=email_result.get("provider", "sendgrid"),
+            provider=email_result.get("provider", "mailchimp"),
             provider_response=email_result.get("provider_response", {}),
             status=email_result.get("status", "error"),
         )
@@ -78,7 +77,7 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
             _record_attempt(
                 record,
                 channel="sms",
-                provider=sms_result.get("provider", "twilio"),
+                provider=sms_result.get("provider", "mailchimp"),
                 provider_response=sms_result.get("provider_response", {}),
                 status=sms_result.get("status", "error"),
             )
@@ -104,7 +103,7 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
         _record_attempt(
             record,
             channel="sms",
-            provider=sms_result.get("provider", "twilio"),
+            provider=sms_result.get("provider", "mailchimp"),
             provider_response=sms_result.get("provider_response", {}),
             status=sms_result.get("status", "error"),
         )

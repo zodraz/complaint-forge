@@ -19,30 +19,30 @@ class CommunicationNodeTests(unittest.TestCase):
     def test_email_success_returns_delivered_email(self):
         with patch("nodes.outbound_communication.send_email", return_value={
             "status": "success",
-            "provider": "sendgrid",
+            "provider": "mailchimp",
             "provider_response": {"status_code": 202},
         }):
             result = communication_node(self.base_state)
 
         self.assertEqual(result["delivery_record"].final_status, "delivered_email")
         self.assertEqual(len(result["delivery_record"].attempts), 1)
-        self.assertEqual(result["delivery_record"].attempts[0].provider, "sendgrid")
+        self.assertEqual(result["delivery_record"].attempts[0].provider, "mailchimp")
 
     def test_email_bounce_triggers_sms_fallback(self):
         with patch("nodes.outbound_communication.send_email", return_value={
             "status": "permanent_failure",
-            "provider": "sendgrid",
+            "provider": "mailchimp",
             "provider_response": {"status_code": 400},
         }), patch("nodes.outbound_communication.send_sms", return_value={
             "status": "success",
-            "provider": "twilio",
+            "provider": "mailchimp",
             "provider_response": {"sid": "SM123"},
         }):
             result = communication_node(self.base_state)
 
         self.assertEqual(result["delivery_record"].final_status, "delivered_sms")
         self.assertEqual(len(result["delivery_record"].attempts), 2)
-        self.assertEqual(result["delivery_record"].attempts[1].provider, "twilio")
+        self.assertEqual(result["delivery_record"].attempts[1].provider, "mailchimp")
 
     def test_email_bounce_without_phone_emits_human_review(self):
         state = dict(self.base_state)
@@ -50,7 +50,7 @@ class CommunicationNodeTests(unittest.TestCase):
 
         with patch("nodes.outbound_communication.send_email", return_value={
             "status": "permanent_failure",
-            "provider": "sendgrid",
+            "provider": "mailchimp",
             "provider_response": {"status_code": 400},
         }), patch("nodes.outbound_communication.interrupt", return_value={"reviewed": True}):
             result = communication_node(state)

@@ -2,14 +2,17 @@
 
 ## Decisions
 
-- SMS provider: Twilio (chosen).
-- Email failure definition: SendGrid permanent bounce events trigger immediate SMS fallback.
-- Retry policy: No automatic retries for other transient HTTP errors by default; behavior must be configurable via environment variables.
+- SMS provider: Mailchimp Transactional SMS API via official SDK (chosen).
+- Email provider: Mailchimp Transactional Email API via official SDK (chosen).
+- Email failure definition: Mailchimp rejected status or permanent errors trigger immediate SMS fallback.
+- Retry policy: No automatic retries for transient HTTP errors by default; behavior configurable via environment variables.
+- Integration approach: Use official `mailchimp_transactional` Python SDK instead of REST API calls.
 
 ## Rationale
 
-- Twilio is a widely used, reliable SMS provider with clear APIs and good Python SDK support.
-- Permanent bounces represent a definitive delivery failure; immediate SMS fallback reduces time-to-notification for customers.
+- Using the official `mailchimp_transactional` SDK provides better type safety, error handling, and future compatibility compared to direct REST API calls.
+- Mailchimp Transactional API provides both email and SMS through a unified platform, reducing operational complexity.
+- Permanent rejections represent a definitive delivery failure; immediate SMS fallback reduces time-to-notification for customers.
 - Making retry behavior configurable allows operators to tune conservatism vs. speed.
 
 ## Alternatives Considered
@@ -19,6 +22,7 @@
 
 ## Action Items
 
-- Implement `tools/sendgrid_tool.py` and `tools/twilio_tool.py` or adapt existing tools following `tools/*` patterns.
-- Add configuration entries in `config.py` for `SENDGRID_API_KEY`, `TWILIO_*`, `COMM_AGENT_RETRY_POLICY`.
-- Add unit and integration tests covering success, bounce, transient failures, and idempotence.
+- Implement `tools/mailchimp_tool.py` with `send_email()` and `send_sms()` functions using the `mailchimp_transactional` SDK.
+- Add configuration entries in `config.py` for `MAILCHIMP_API_KEY`, `MAILCHIMP_FROM_EMAIL`, `MAILCHIMP_TIMEOUT`.
+- Add `mailchimp-transactional` to `requirements.txt` for SDK dependency.
+- Add unit and integration tests covering success, rejection, transient failures, and idempotence.
