@@ -1,3 +1,4 @@
+import newrelic.agent
 from langchain_core.prompts import ChatPromptTemplate
 from prompts.system_prompts import RESOLVER_PROMPT
 from llm_factory import get_chat_llm
@@ -23,17 +24,49 @@ class ResolutionResult(BaseModel):
     confidence: float = Field(description="Resolution confidence from 0.0 to 1.0.")
 
 
+@newrelic.agent.function_trace()
 def resolver(state: dict) -> dict:
     """
     Decides the best resolution based on policy + customer history + analysis
     """
     prompt = ChatPromptTemplate.from_template(RESOLVER_PROMPT)
-    
+
     chain = prompt | llm.with_structured_output(ResolutionResult)
-    
+
     result = chain.invoke({
         "history": json.dumps(state.get("customer_history", {}), indent=2),
         "analysis": json.dumps(state.get("analysis", {}), indent=2)
     }).model_dump()
-    
+
+    resolution_type = result.get("resolution_type", "")
+    refund_amount = result.get("refund_amount", 0.0)
+    credit_amount = result.get("credit_amount", 0.0)
+    confidence = result.get("confidence", 0.0)
+    action_needed = result.get("action_needed", "")
+
+    newrelic.agent.add_custom_attribute("resolution.type", resolution_type)
+    newrelic.agent.add_custom_attribute("resolution.refund_amount", refund_amount)
+    newrelic.agent.add_custom_attribute("resolution.credit_amount", credit_amount)
+    newrelic.agent.add_custom_attribute("resolution.confidence", confidence)
+
+    newrelic.agent.record_custom_metric("Custom/Resolution/RefundAmount", refund_amount)
+    newrelic.agent.record_custom_metric("Custom/Resolution/CreditAmount", credit_amount)
+    newrelic.agent.record_custom_metric("Custom/Resolution/Confidence", confidence)
+
+    newrelic.agent.record_custom_event("ResolutionResult", {
+        "resolution_type": resolution_type,
+        "refund_amount": refund_amount,
+        "credit_amount": credit_amount,
+        "confidence": confidence,
+        "action_needed": action_needed[:255],
+    })
+
+    newrelic.agent.record_log_event("Resolution determined", level="INFO", attributes={"resolution_type": result.get("resolution_type",""), "refund_amount": result.get("refund_amount", 0.0), "credit_amount": result.get("credit_amount", 0.0), "confidence": result.get("confidence", 0.0)})
+
+    if result.get("confidence", 1.0) < 0.85:
+        newrelic.agent.record_log_event("Low confidence resolution, may escalate", level="WARNING", attributes={"confidence": result.get("confidence", 0.0), "resolution_type": result.get("resolution_type","")})
+
+    if result.get("resolution_type") == "escalate":
+        newrelic.agent.record_log_event("Resolver recommends escalation", level="WARNING", attributes={"action_needed": str(result.get("action_needed",""))[:255]})
+
     return {"resolution": result}

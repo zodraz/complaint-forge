@@ -1,5 +1,7 @@
 from typing import Any
 
+import newrelic.agent
+
 
 def _append_reason(reasons: list[str], condition: bool, reason: str) -> None:
     if condition:
@@ -15,6 +17,7 @@ def _complaint_mentions_excluded_product(complaint: str, analysis: dict[str, Any
     return any(term in text for term in ("digital", "download", "custom", "personalized"))
 
 
+@newrelic.agent.function_trace()
 def policy(state: dict[str, Any]) -> dict[str, Any]:
     """Apply deterministic business policy before drafting or external actions."""
     resolution = dict(state.get("resolution", {}))
@@ -55,6 +58,16 @@ def policy(state: dict[str, Any]) -> dict[str, Any]:
         and resolution.get("resolution_type") in {"full_refund", "partial_refund"},
         "Digital or custom products cannot be refunded automatically",
     )
+
+    newrelic.agent.add_custom_attribute("policy.approved", not bool(reasons))
+    newrelic.agent.add_custom_attribute("policy.escalation_reasons_count", len(reasons))
+    newrelic.agent.record_custom_metric("Custom/Policy/Escalated", 1 if reasons else 0)
+    newrelic.agent.record_custom_event("PolicyDecision", {"approved": not bool(reasons), "reasons_count": len(reasons), "refund_amount": refund_amount, "confidence": confidence, "is_excluded_product": is_excluded_product})
+
+    if reasons:
+        newrelic.agent.record_log_event("Policy escalation triggered", level="WARNING", attributes={"reasons": "; ".join(reasons)[:255], "refund_amount": refund_amount, "confidence": confidence})
+    else:
+        newrelic.agent.record_log_event("Policy approved resolution", level="INFO", attributes={"resolution_type": resolution.get("resolution_type",""), "refund_amount": refund_amount, "confidence": confidence})
 
     if reasons:
         resolution.update({

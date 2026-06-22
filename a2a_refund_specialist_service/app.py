@@ -1,3 +1,6 @@
+import newrelic.agent
+newrelic.agent.initialize()
+
 import json
 import os
 import sys
@@ -83,10 +86,14 @@ def _crewai_import_failure_reason(error: Exception) -> str:
     return reason
 
 
+@newrelic.agent.function_trace()
 async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
     try:
         from crewai import Agent, Crew, Process, Task
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_custom_event("CrewAIReview", {"status": "import_failed", "source": "fallback"})
+        newrelic.agent.record_log_event("CrewAI import failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
         return _fallback_recommendation(_crewai_import_failure_reason(e))
 
     try:
@@ -129,17 +136,27 @@ async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
             verbose=True,
         )
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_custom_event("CrewAIReview", {"status": "setup_failed", "source": "fallback"})
+        newrelic.agent.record_log_event("CrewAI setup failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
         return _fallback_recommendation(f"CrewAI setup failed: {e}")
 
     try:
         output = await crew.kickoff_async()
         raw = getattr(output, "raw", str(output))
+        newrelic.agent.add_custom_attribute("crewai.source", "crewai")
+        newrelic.agent.record_custom_event("CrewAIReview", {"status": "success", "source": "crewai"})
+        newrelic.agent.record_custom_metric("Custom/A2A/CrewAISuccess", 1)
+        newrelic.agent.record_log_event("CrewAI specialist review completed successfully", level="INFO", attributes={"source": "crewai"})
         return {
             "status": "success",
             "source": "crewai",
             "recommendation": _extract_json(raw),
         }
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_custom_event("CrewAIReview", {"status": "execution_failed", "source": "fallback"})
+        newrelic.agent.record_log_event("CrewAI execution failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
         return _fallback_recommendation(f"CrewAI execution failed: {e}")
 
 
@@ -165,6 +182,8 @@ async def refund_specialist(
     authorization: str | None = Header(default=None),
 ):
     _authorize(authorization)
+    newrelic.agent.add_custom_attribute("specialist.has_order_id", bool(request.order_id))
+    newrelic.agent.add_custom_attribute("specialist.has_customer_email", bool(request.customer_email))
     return await run_crewai_review(request)
 
 

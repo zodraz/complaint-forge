@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import newrelic.agent
+
 from typing import Any
 
 import requests
@@ -262,6 +264,7 @@ def _create_task(
     }
 
 
+@newrelic.agent.function_trace()
 def get_customer_history(email: str, order_id: str | None = None) -> dict[str, Any]:
     """Pull customer, case, opportunity, and order context from Salesforce."""
     try:
@@ -276,6 +279,8 @@ def get_customer_history(email: str, order_id: str | None = None) -> dict[str, A
         order = _find_order(order_id, account_id)
         return_orders = _recent_return_orders(account_id, order)
 
+        newrelic.agent.record_custom_event("SalesforceHistoryLookup", {"customer_found": True, "has_prior_cases": bool(cases), "has_prior_return_orders": bool(return_orders), "total_cases": len(cases), "total_opportunities": len(opportunities)})
+        newrelic.agent.record_log_event("Salesforce customer history retrieved", level="INFO", attributes={"email": email, "has_prior_cases": bool(cases), "total_cases": len(cases), "matched_order": bool(order)})
         return {
             "source": "salesforce",
             "contact_id": contact["Id"],
@@ -297,9 +302,12 @@ def get_customer_history(email: str, order_id: str | None = None) -> dict[str, A
             "has_prior_return_orders": bool(return_orders),
         }
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Salesforce customer history lookup failed", level="ERROR", attributes={"email": str(email or "")[:255], "error": str(e)[:255]})
         return {"error": str(e), "source": "salesforce"}
 
 
+@newrelic.agent.function_trace()
 def process_refund(
     customer_history: dict[str, Any],
     amount: float,
@@ -307,16 +315,21 @@ def process_refund(
 ) -> dict[str, Any]:
     """Create a Salesforce Case for a refund workflow."""
     try:
-        return _create_case(
+        result = _create_case(
             customer_history,
             subject=f"Refund request - {customer_history.get('email', 'unknown customer')}",
             description=_case_description(customer_history, amount, reason),
             priority="High",
         )
+        newrelic.agent.record_log_event("Salesforce refund case created", level="INFO", attributes={"email": str(customer_history.get("email",""))[:255], "amount": amount})
+        return result
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Salesforce refund case creation failed", level="ERROR", attributes={"email": str(customer_history.get("email",""))[:255], "amount": amount, "error": str(e)[:255]})
         return {"status": "error", "message": str(e)}
 
 
+@newrelic.agent.function_trace()
 def issue_credit(
     customer_history: dict[str, Any],
     amount: float,
@@ -330,9 +343,12 @@ def issue_credit(
             description=_case_description(customer_history, amount, reason),
         )
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Salesforce credit case creation failed", level="ERROR", attributes={"email": str(customer_history.get("email",""))[:255], "error": str(e)[:255]})
         return {"status": "error", "message": str(e)}
 
 
+@newrelic.agent.function_trace()
 def create_replacement_order(customer_history: dict[str, Any]) -> dict[str, Any]:
     """Create a Salesforce Task to coordinate a replacement order."""
     try:
@@ -346,4 +362,6 @@ def create_replacement_order(customer_history: dict[str, Any]) -> dict[str, Any]
             ),
         )
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Salesforce replacement task creation failed", level="ERROR", attributes={"email": str(customer_history.get("email",""))[:255], "error": str(e)[:255]})
         return {"status": "error", "message": str(e)}

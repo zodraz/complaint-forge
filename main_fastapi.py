@@ -1,3 +1,6 @@
+import newrelic.agent
+newrelic.agent.initialize()
+
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import uuid
@@ -113,7 +116,11 @@ async def process_complaint_async(
         ticket_id=ticket_id,
         requester_email=email,
     )
-    
+    newrelic.agent.add_custom_attribute("complaint.thread_id", thread_id)
+    newrelic.agent.add_custom_attribute("complaint.ticket_id", ticket_id)
+    newrelic.agent.record_custom_event("ComplaintWorkflowStarted", {"thread_id": thread_id, "ticket_id": ticket_id, "email": email})
+    newrelic.agent.record_log_event("Complaint workflow started", level="INFO", attributes={"thread_id": thread_id, "ticket_id": ticket_id, "email": email})
+
     initial_state = {
         "complaint": f"Ticket #{ticket_id}\n\n{complaint_text}",
         "messages": []
@@ -129,6 +136,10 @@ async def process_complaint_async(
                 status="pending_review",
                 interrupts=interrupts,
             )
+            newrelic.agent.add_custom_attribute("complaint.status", "pending_review")
+            newrelic.agent.record_custom_metric("Custom/Complaint/PendingReview", 1)
+            newrelic.agent.record_custom_event("ComplaintWorkflowPaused", {"thread_id": thread_id, "ticket_id": ticket_id})
+            newrelic.agent.record_log_event("Complaint workflow paused for human review", level="WARNING", attributes={"thread_id": thread_id, "ticket_id": ticket_id})
             print(f"Ticket #{ticket_id} paused for human review")
             return {
                 "status": "pending_review",
@@ -143,9 +154,15 @@ async def process_complaint_async(
         )
         
         print(f"Ticket #{ticket_id} processed successfully")
+        newrelic.agent.add_custom_attribute("complaint.status", "completed")
+        newrelic.agent.record_custom_metric("Custom/Complaint/Completed", 1)
+        newrelic.agent.record_custom_event("ComplaintWorkflowCompleted", {"thread_id": thread_id, "ticket_id": ticket_id})
+        newrelic.agent.record_log_event("Complaint workflow completed successfully", level="INFO", attributes={"thread_id": thread_id, "ticket_id": ticket_id})
         return {"status": "completed", "thread_id": thread_id, "result": result}
 
     except Exception as e:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Complaint workflow failed with exception", level="ERROR", attributes={"thread_id": thread_id, "ticket_id": ticket_id, "error": str(e)[:255]})
         _record_run(thread_id, status="error", error=str(e))
         print(f"Error processing ticket #{ticket_id}: {e}")
         raise
@@ -174,6 +191,11 @@ async def zendesk_complaint_webhook(
 
         complaint_text = f"Subject: {subject}\n\n{description}"
         thread_id = str(uuid.uuid4())
+
+        newrelic.agent.add_custom_attribute("webhook.ticket_id", ticket_id or 0)
+        newrelic.agent.add_custom_attribute("webhook.thread_id", thread_id)
+        newrelic.agent.record_custom_event("WebhookReceived", {"ticket_id": ticket_id or 0, "thread_id": thread_id, "has_email": bool(requester_email)})
+        newrelic.agent.record_log_event("Zendesk webhook received", level="INFO", attributes={"ticket_id": ticket_id or 0, "thread_id": thread_id})
 
         background_tasks.add_task(
             process_complaint_async,
@@ -218,6 +240,8 @@ async def test_complaint(payload: dict):
 # ========================== HUMAN REVIEW ==========================
 @app.get("/review")
 async def list_reviews():
+    pending_count = len([r for r in review_runs.values() if r.get("status") == "pending_review"])
+    newrelic.agent.record_custom_metric("Custom/Review/PendingCount", pending_count)
     return {
         "reviews": [
             run for run in review_runs.values()
@@ -241,6 +265,9 @@ async def resume_review(thread_id: str, review: HumanReviewResume):
     payload = review.model_dump(exclude_none=True)
     if not payload:
         raise HTTPException(status_code=400, detail="Resume payload cannot be empty")
+
+    newrelic.agent.add_custom_attribute("review.thread_id", thread_id)
+    newrelic.agent.add_custom_attribute("review.approved", review.approved or False)
 
     try:
         result = await complaint_graph.ainvoke(
@@ -266,6 +293,9 @@ async def resume_review(thread_id: str, review: HumanReviewResume):
         ticket_id=ticket_id,
         result=result,
     )
+    newrelic.agent.record_custom_event("HumanReviewResumed", {"thread_id": thread_id, "approved": review.approved or False, "status": "completed"})
+    newrelic.agent.record_log_event("Human review resumed and workflow completed", level="INFO", attributes={"thread_id": thread_id, "approved": review.approved or False})
+    newrelic.agent.record_custom_metric("Custom/Review/Resumed", 1)
     return {
         "status": "completed",
         "thread_id": thread_id,

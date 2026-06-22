@@ -1,4 +1,5 @@
 import os
+import newrelic.agent
 from typing import Any
 
 try:
@@ -35,6 +36,7 @@ def _classify_mailchimp_error(error_code: int | str) -> str:
     return "transient_failure"
 
 
+@newrelic.agent.function_trace()
 def send_email(
     *,
     subject: str,
@@ -90,6 +92,9 @@ def send_email(
             status_value = result.get("status", "")
 
             if status_value == "sent" or status_value == "queued":
+                newrelic.agent.record_custom_event("MailchimpDelivery", {"channel": "email", "status": "success"})
+                newrelic.agent.record_custom_metric("Custom/Mailchimp/EmailSent", 1)
+                newrelic.agent.record_log_event("Mailchimp email sent successfully", level="INFO", attributes={"to": to_email, "status": status_value})
                 return {
                     "status": "success",
                     "provider": "mailchimp",
@@ -99,6 +104,9 @@ def send_email(
                     },
                 }
             elif status_value == "rejected":
+                newrelic.agent.record_custom_event("MailchimpDelivery", {"channel": "email", "status": "rejected"})
+                newrelic.agent.record_custom_metric("Custom/Mailchimp/EmailRejected", 1)
+                newrelic.agent.record_log_event("Mailchimp email rejected", level="WARNING", attributes={"to": to_email, "status": status_value, "reason": str(result.get("reason") or result.get("reject_reason",""))[:255]})
                 return {
                     "status": "permanent_failure",
                     "provider": "mailchimp",
@@ -122,7 +130,9 @@ def send_email(
         }
 
     except Exception as exc:
+        newrelic.agent.notice_error()
         error_str = str(exc)
+        newrelic.agent.record_log_event("Mailchimp email send failed", level="ERROR", attributes={"to": to_email, "error": error_str[:255]})
         # Check if this is a known error type from the SDK
         if hasattr(exc, "status") or hasattr(exc, "error_code"):
             error_code = getattr(exc, "error_code", getattr(exc, "status", None))
@@ -137,6 +147,7 @@ def send_email(
         }
 
 
+@newrelic.agent.function_trace()
 def send_sms(*, to: str, message: str) -> dict[str, Any]:
     """Send an SMS through Mailchimp Transactional SMS API using the official SDK."""
     missing = _missing_config("sms")
@@ -178,6 +189,9 @@ def send_sms(*, to: str, message: str) -> dict[str, Any]:
             status_value = result.get("state", "")
 
             if status_value == "sent" or status_value == "queued":
+                newrelic.agent.record_custom_event("MailchimpDelivery", {"channel": "sms", "status": "success"})
+                newrelic.agent.record_custom_metric("Custom/Mailchimp/SMSSent", 1)
+                newrelic.agent.record_log_event("Mailchimp SMS sent successfully", level="INFO", attributes={"to": to, "state": status_value})
                 return {
                     "status": "success",
                     "provider": "mailchimp",
@@ -187,6 +201,9 @@ def send_sms(*, to: str, message: str) -> dict[str, Any]:
                     },
                 }
             elif status_value == "rejected" or status_value == "failed":
+                newrelic.agent.record_custom_event("MailchimpDelivery", {"channel": "sms", "status": "rejected"})
+                newrelic.agent.record_custom_metric("Custom/Mailchimp/SMSRejected", 1)
+                newrelic.agent.record_log_event("Mailchimp SMS rejected or failed", level="WARNING", attributes={"to": to, "state": status_value})
                 return {
                     "status": "permanent_failure",
                     "provider": "mailchimp",
@@ -210,7 +227,9 @@ def send_sms(*, to: str, message: str) -> dict[str, Any]:
         }
 
     except Exception as exc:
+        newrelic.agent.notice_error()
         error_str = str(exc)
+        newrelic.agent.record_log_event("Mailchimp SMS send failed", level="ERROR", attributes={"to": to, "error": error_str[:255]})
         # Check if this is a known error type from the SDK
         if hasattr(exc, "status") or hasattr(exc, "error_code"):
             error_code = getattr(exc, "error_code", getattr(exc, "status", None))

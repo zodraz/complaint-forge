@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import newrelic.agent
+
 from typing import Any
 
 from langgraph.types import interrupt
 from nodes.communication_models import CommunicationPayload, DeliveryAttempt, DeliveryRecord
 from tools.mailchimp_tool import send_email, send_sms
+from config import OUTBOUND_COMMUNICATION_ENABLED
 
 
 def _build_sms_message(payload: CommunicationPayload) -> str:
@@ -33,8 +36,20 @@ def _record_attempt(
     record.last_updated = record.attempts[-1].timestamp
 
 
+@newrelic.agent.function_trace()
 def communication_node(state: dict[str, Any]) -> dict[str, Any]:
     """Send a final communication via email then SMS fallback on permanent failure."""
+    if not OUTBOUND_COMMUNICATION_ENABLED:
+        newrelic.agent.add_custom_attribute("delivery.final_status", "skipped")
+        newrelic.agent.record_custom_event("CommunicationDelivery", {"final_status": "skipped", "channel": "none", "outbound_enabled": False})
+        newrelic.agent.record_log_event("Outbound communication skipped (feature flag disabled)", level="INFO", attributes={"correlation_id": state.get("correlation_id","")})
+        return {
+            "delivery_record": DeliveryRecord(
+                correlation_id=state.get("correlation_id", ""),
+                final_status="skipped",
+            )
+        }
+
     payload = CommunicationPayload(
         correlation_id=state.get("correlation_id", ""),
         subject=state.get("subject", "Customer update"),
@@ -69,6 +84,11 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
 
         if email_result.get("status") == "success":
             record.final_status = "delivered_email"
+            newrelic.agent.add_custom_attribute("delivery.final_status", "delivered_email")
+            newrelic.agent.add_custom_attribute("delivery.channel", "email")
+            newrelic.agent.record_custom_metric("Custom/Communication/DeliveredEmail", 1)
+            newrelic.agent.record_custom_event("CommunicationDelivery", {"final_status": "delivered_email", "channel": "email"})
+            newrelic.agent.record_log_event("Email delivered successfully", level="INFO", attributes={"correlation_id": payload.correlation_id, "to_email": str(payload.recipient_email)})
             return {"delivery_record": record}
 
         if email_result.get("status") == "permanent_failure" and payload.recipient_phone:
@@ -84,10 +104,18 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
 
             if sms_result.get("status") == "success":
                 record.final_status = "delivered_sms"
+                newrelic.agent.add_custom_attribute("delivery.final_status", "delivered_sms")
+                newrelic.agent.add_custom_attribute("delivery.channel", "sms")
+                newrelic.agent.record_custom_metric("Custom/Communication/DeliveredSms", 1)
+                newrelic.agent.record_custom_event("CommunicationDelivery", {"final_status": "delivered_sms", "channel": "sms"})
+                newrelic.agent.record_log_event("SMS delivered successfully", level="INFO", attributes={"correlation_id": payload.correlation_id})
                 return {"delivery_record": record}
 
         if email_result.get("status") == "permanent_failure":
             record.final_status = "failed"
+            newrelic.agent.add_custom_attribute("delivery.final_status", "failed")
+            newrelic.agent.record_custom_metric("Custom/Communication/DeliveryFailed", 1)
+            newrelic.agent.record_log_event("Communication delivery failed", level="ERROR", attributes={"correlation_id": payload.correlation_id, "reason": "permanent_failure or no recipient"})
             review = interrupt({
                 "reason": "Communication failed after email bounce",
                 "delivery_record": record.model_dump(),
@@ -110,9 +138,17 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
 
         if sms_result.get("status") == "success":
             record.final_status = "delivered_sms"
+            newrelic.agent.add_custom_attribute("delivery.final_status", "delivered_sms")
+            newrelic.agent.add_custom_attribute("delivery.channel", "sms")
+            newrelic.agent.record_custom_metric("Custom/Communication/DeliveredSms", 1)
+            newrelic.agent.record_custom_event("CommunicationDelivery", {"final_status": "delivered_sms", "channel": "sms"})
+            newrelic.agent.record_log_event("SMS delivered successfully", level="INFO", attributes={"correlation_id": payload.correlation_id})
             return {"delivery_record": record}
 
         record.final_status = "failed"
+        newrelic.agent.add_custom_attribute("delivery.final_status", "failed")
+        newrelic.agent.record_custom_metric("Custom/Communication/DeliveryFailed", 1)
+        newrelic.agent.record_log_event("Communication delivery failed", level="ERROR", attributes={"correlation_id": payload.correlation_id, "reason": "permanent_failure or no recipient"})
         review = interrupt({
             "reason": "SMS communication failed",
             "delivery_record": record.model_dump(),
@@ -123,6 +159,9 @@ def communication_node(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     record.final_status = "failed"
+    newrelic.agent.add_custom_attribute("delivery.final_status", "failed")
+    newrelic.agent.record_custom_metric("Custom/Communication/DeliveryFailed", 1)
+    newrelic.agent.record_log_event("Communication delivery failed", level="ERROR", attributes={"correlation_id": payload.correlation_id, "reason": "permanent_failure or no recipient"})
     review = interrupt({
         "reason": "No valid recipient available for communication",
         "delivery_record": record.model_dump(),

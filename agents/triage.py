@@ -1,3 +1,5 @@
+import newrelic.agent
+
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
@@ -16,6 +18,7 @@ class TriageResult(BaseModel):
     order_id: str | None = Field(default=None, description="Order id if found.")
 
 
+@newrelic.agent.function_trace()
 def triage(state: dict) -> dict:
     prompt = ChatPromptTemplate.from_template(TRIAGE_PROMPT)
     chain = prompt | llm.with_structured_output(TriageResult)
@@ -23,6 +26,8 @@ def triage(state: dict) -> dict:
     try:
         result = chain.invoke({"input": state["complaint"]}).model_dump()
     except Exception as exc:
+        newrelic.agent.notice_error()
+        newrelic.agent.record_log_event("Triage LLM unavailable, using fallback", level="WARNING", attributes={"error": str(exc)})
         result = {
             "is_complaint": False,
             "confidence": 0.0,
@@ -30,6 +35,23 @@ def triage(state: dict) -> dict:
             "customer_email": None,
             "order_id": None,
         }
+
+    newrelic.agent.add_custom_attribute("triage.is_complaint", result["is_complaint"])
+    newrelic.agent.add_custom_attribute("triage.confidence", result["confidence"])
+    newrelic.agent.record_custom_metric("Custom/Triage/Confidence", result["confidence"])
+    newrelic.agent.record_custom_metric("Custom/Triage/IsComplaint", 1 if result["is_complaint"] else 0)
+    newrelic.agent.record_custom_event("TriageResult", {
+        "is_complaint": result["is_complaint"],
+        "confidence": result["confidence"],
+        "reason": result["reason"][:255],
+        "has_email": result["customer_email"] is not None,
+        "has_order_id": result["order_id"] is not None,
+    })
+
+    if result.get("is_complaint"):
+        newrelic.agent.record_log_event("Ticket classified as complaint", level="INFO", attributes={"confidence": result.get("confidence", 0.0), "order_id": result.get("order_id")})
+    else:
+        newrelic.agent.record_log_event("Ticket classified as non-complaint, will be ignored", level="INFO", attributes={"confidence": result.get("confidence", 0.0), "reason": str(result.get("reason",""))[:255]})
 
     return {
         "triage": result,
