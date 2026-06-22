@@ -17,4 +17,3 @@ def customer_context(state: dict) -> dict:
             "customer_found": bool(history and not history.get("error")),
         },
     }
-

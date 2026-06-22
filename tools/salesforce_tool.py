@@ -347,4 +347,3 @@ def create_replacement_order(customer_history: dict[str, Any]) -> dict[str, Any]
         )
     except Exception as e:
         return {"status": "error", "message": str(e)}
-

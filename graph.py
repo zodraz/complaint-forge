@@ -169,4 +169,3 @@ workflow.add_edge("ignored", END)
 app = workflow.compile(checkpointer=checkpointer)
 
 print(f"LangGraph compiled with LangSmith tracing {'enabled' if _tracing_enabled else 'disabled'}")
-
