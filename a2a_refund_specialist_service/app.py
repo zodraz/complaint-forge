@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import newrelic.agent
 newrelic.agent.initialize()
 
@@ -6,13 +9,10 @@ import os
 import sys
 from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from llm_factory import get_chat_llm
-
-load_dotenv()
 
 app = FastAPI(
     title="Refund Specialist A2A Service",

@@ -16,6 +16,8 @@ services:
       - NEW_RELIC_APP_NAME=complaintforge-complaint-handler
       - NEW_RELIC_LOG=stdout
       - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
+      - NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
+      - NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
 
   a2a-specialist:
     build: ./a2a_refund_specialist_service
@@ -29,6 +31,8 @@ services:
       - NEW_RELIC_APP_NAME=complaintforge-a2a-specialist
       - NEW_RELIC_LOG=stdout
       - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
+      - NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
+      - NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
 
   # locust:
   #   build: ./locust

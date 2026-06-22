@@ -17,7 +17,9 @@
             "cwd": "${workspaceFolder}",
             "envFile": "${workspaceFolder}/.env",
             "env": {
-                "NEW_RELIC_APP_NAME": "complaintforge-complaint-handler"
+                "NEW_RELIC_APP_NAME": "complaintforge-complaint-handler",
+                "NEW_RELIC_APPLICATION_LOGGING_ENABLED": "true",
+                "NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED": "true"
             },
             "console": "integratedTerminal",
             "jinja": true,
@@ -39,7 +41,9 @@
             "cwd": "${workspaceFolder}/a2a_refund_specialist_service",
             "envFile": "${workspaceFolder}/a2a_refund_specialist_service/.env",
             "env": {
-                "NEW_RELIC_APP_NAME": "complaintforge-a2a-specialist"
+                "NEW_RELIC_APP_NAME": "complaintforge-a2a-specialist",
+                "NEW_RELIC_APPLICATION_LOGGING_ENABLED": "true",
+                "NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED": "true"
             },
             "console": "integratedTerminal",
             "jinja": true,

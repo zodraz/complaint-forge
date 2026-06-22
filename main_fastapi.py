@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import newrelic.agent
 newrelic.agent.initialize()
 
@@ -5,11 +8,8 @@ from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 import uuid
 import os
-from dotenv import load_dotenv
 from langsmith import traceable
 from langgraph.types import Command
-
-load_dotenv()
 
 # ========================== IMPORTS ==========================
 from graph import app as complaint_graph
@@ -98,6 +98,7 @@ async def _finalize_completed_workflow(
 
 
 # ========================== BACKGROUND PROCESSOR ==========================
+@newrelic.agent.background_task(name="process_complaint_async", group="ComplaintForge")
 @traceable(run_type="chain", name="Autonomous Complaint Handler")
 async def process_complaint_async(
     complaint_text: str,
