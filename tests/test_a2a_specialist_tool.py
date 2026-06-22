@@ -45,6 +45,7 @@ class A2ASpecialistToolTests(unittest.TestCase):
                 "complaint": "Refund me",
                 "triage": {"is_complaint": True},
                 "customer_email": "ada@example.com",
+                "customer_phone": "+15551234567",
                 "order_id": "ORD-1",
                 "customer_history": {"matched_order": {"TotalAmount": 900}},
                 "analysis": {"sentiment": "very_negative"},
@@ -59,6 +60,7 @@ class A2ASpecialistToolTests(unittest.TestCase):
         self.assertEqual(captured["headers"]["Authorization"], "Bearer secret")
         self.assertEqual(captured["timeout"], 60)
         self.assertEqual(captured["json"]["customer_email"], "ada@example.com")
+        self.assertEqual(captured["json"]["customer_phone"], "+15551234567")
         self.assertEqual(captured["json"]["resolution"]["resolution_type"], "escalate")
 
     def test_request_specialist_review_retries_temporal_failures_then_succeeds(self):

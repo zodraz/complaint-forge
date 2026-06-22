@@ -114,7 +114,7 @@ def _first(records: list[dict[str, Any]]) -> dict[str, Any] | None:
 def _find_contact(email: str) -> dict[str, Any] | None:
     return _first(
         _query(
-            "SELECT Id, Email, Name, AccountId, Account.Name "
+            "SELECT Id, Email, Phone, Name, AccountId, Account.Name "
             f"FROM Contact WHERE Email = {_soql_string(email)} LIMIT 1"
         )
     )
@@ -283,6 +283,7 @@ def get_customer_history(email: str, order_id: str | None = None) -> dict[str, A
             "account_name": account.get("Name"),
             "name": contact.get("Name"),
             "email": email,
+            "phone": contact.get("Phone"),
             "order_id": order_id,
             "matched_order": order,
             "recent_return_orders": return_orders,
@@ -346,3 +347,4 @@ def create_replacement_order(customer_history: dict[str, Any]) -> dict[str, Any]
         )
     except Exception as e:
         return {"status": "error", "message": str(e)}
+

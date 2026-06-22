@@ -2,11 +2,31 @@ import unittest
 from unittest.mock import patch
 
 import tools.a2a_specialist_tool as specialist_tool
+import nodes.customer_context as customer_context_node
 import nodes.human_review as human_review_node
 import nodes.specialist_review as specialist_review_node
 
 
 class NodeTests(unittest.TestCase):
+    def test_customer_context_propagates_salesforce_phone(self):
+        with patch.object(
+            customer_context_node,
+            "get_customer_history",
+            lambda email, order_id=None: {
+                "source": "salesforce",
+                "email": email,
+                "phone": "+15551234567",
+                "order_id": order_id,
+            },
+        ):
+            result = customer_context_node.customer_context({
+                "customer_email": "ada@example.com",
+                "order_id": "ORD-1",
+            })
+
+        self.assertEqual(result["customer_phone"], "+15551234567")
+        self.assertEqual(result["customer_history"]["phone"], "+15551234567")
+
     def test_specialist_review_records_recommendation(self):
         recommendation = {
             "status": "success",
@@ -74,6 +94,7 @@ class NodeTests(unittest.TestCase):
             result = human_review_node.human_review({
                 "complaint": "Refund me",
                 "customer_email": "ada@example.com",
+                "customer_phone": "+15551234567",
                 "order_id": "ORD-1",
                 "customer_history": {"has_prior_cases": True},
                 "analysis": {"urgency": "high"},
@@ -85,6 +106,7 @@ class NodeTests(unittest.TestCase):
             })
 
         self.assertEqual(captured["specialist_review"], {"recommendation": {"risk_level": "medium"}})
+        self.assertEqual(captured["customer_phone"], "+15551234567")
         self.assertEqual(captured["reason"], "High value refund")
         self.assertIs(result["human_review"]["approved"], True)
         self.assertEqual(result["final_response"], "Approved response")

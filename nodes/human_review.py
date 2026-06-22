@@ -7,6 +7,7 @@ def human_review(state: dict) -> dict:
         "reason": resolution.get("action_needed", "Escalation requested"),
         "complaint": state.get("complaint"),
         "customer_email": state.get("customer_email"),
+        "customer_phone": state.get("customer_phone"),
         "order_id": state.get("order_id"),
         "customer_history": state.get("customer_history", {}),
         "analysis": state.get("analysis", {}),
@@ -30,3 +31,4 @@ def human_review(state: dict) -> dict:
             "support team for review, and we will follow up with you directly."
         ),
     }
+

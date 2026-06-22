@@ -42,6 +42,7 @@ class ComplaintState(TypedDict):
     complaint: str
     triage: dict
     customer_email: str | None
+    customer_phone: str | None
     order_id: str | None
     customer_history: dict
     customer_context_result: dict
@@ -168,3 +169,4 @@ workflow.add_edge("ignored", END)
 app = workflow.compile(checkpointer=checkpointer)
 
 print(f"LangGraph compiled with LangSmith tracing {'enabled' if _tracing_enabled else 'disabled'}")
+

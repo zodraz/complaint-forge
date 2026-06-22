@@ -83,6 +83,34 @@ class SalesforceToolTests(unittest.TestCase):
             },
         )
 
+    def test_get_customer_history_includes_optional_contact_phone(self):
+        def fake_query(soql):
+            if "FROM Contact" in soql:
+                self.assertIn("Phone", soql)
+                return [{
+                    "Id": "003xx0000000001AAA",
+                    "Email": "ada@example.com",
+                    "Phone": "+15551234567",
+                    "Name": "Ada Lovelace",
+                    "AccountId": "001xx0000000001AAA",
+                    "Account": {"Name": "Ada Co"},
+                }]
+            if "FROM Case" in soql:
+                return []
+            if "FROM Opportunity" in soql:
+                return []
+            if "FROM Order" in soql:
+                return []
+            if "FROM ReturnOrder" in soql:
+                return []
+            return []
+
+        with patch.object(tool, "_query", fake_query):
+            history = tool.get_customer_history("ada@example.com", order_id="ORD-1")
+
+        self.assertEqual(history["phone"], "+15551234567")
+        self.assertEqual(history["email"], "ada@example.com")
+
 
 if __name__ == "__main__":
     unittest.main()

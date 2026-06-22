@@ -26,6 +26,7 @@ def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
         "complaint": state.get("complaint"),
         "triage": state.get("triage", {}),
         "customer_email": state.get("customer_email"),
+        "customer_phone": state.get("customer_phone"),
         "order_id": state.get("order_id"),
         "customer_history": state.get("customer_history", {}),
         "analysis": state.get("analysis", {}),
@@ -87,3 +88,4 @@ def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
         "retry_attempts": max_retries,
         "fallback": "retry_exhausted",
     }
+
