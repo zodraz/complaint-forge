@@ -12,12 +12,9 @@ services:
       - LANGCHAIN_TRACING_V2=true
       - LANGCHAIN_PROJECT=complaintforge-complaint-handler
       - OUTBOUND_COMMUNICATION_ENABLED=${OUTBOUND_COMMUNICATION_ENABLED:-true}
-      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - NEW_RELIC_APP_NAME=complaintforge-complaint-handler
-      - NEW_RELIC_LOG=stdout
-      - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
-      - NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
-      - NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
+      - OTEL_SERVICE_NAME=complaintforge-complaint-handler
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
 
   a2a-specialist:
     build: ./a2a_refund_specialist_service
@@ -27,12 +24,9 @@ services:
       - ./a2a_refund_specialist_service/.env
     restart: unless-stopped
     environment:
-      - NEW_RELIC_LICENSE_KEY=${NEW_RELIC_LICENSE_KEY}
-      - NEW_RELIC_APP_NAME=complaintforge-a2a-specialist
-      - NEW_RELIC_LOG=stdout
-      - NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true
-      - NEW_RELIC_APPLICATION_LOGGING_ENABLED=true
-      - NEW_RELIC_APPLICATION_LOGGING_FORWARDING_ENABLED=true
+      - OTEL_SERVICE_NAME=complaintforge-a2a-specialist
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-https://otlp.nr-data.net}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
 
   # locust:
   #   build: ./locust

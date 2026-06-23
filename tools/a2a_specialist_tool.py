@@ -1,22 +1,25 @@
+import logging
 import os
 import time
 from typing import Any
 
-import newrelic.agent
 import requests
-from requests.exceptions import HTTPError, RequestException, Timeout, ConnectionError
+from requests.exceptions import ConnectionError, HTTPError, RequestException, Timeout
 
+from otel import add_event, function_trace, record_metric, set_attribute
+
+logger = logging.getLogger(__name__)
 
 A2A_SPECIALIST_URL = os.getenv("A2A_SPECIALIST_URL")
 A2A_SPECIALIST_AUTH_TOKEN = os.getenv("A2A_SPECIALIST_AUTH_TOKEN")
 
 
-@newrelic.agent.function_trace()
+@function_trace()
 def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
     """Call the external A2A specialist service for an escalation recommendation."""
     if not A2A_SPECIALIST_URL:
-        newrelic.agent.record_custom_event("A2ASpecialistCall", {"status": "skipped", "reason": "not_configured"})
-        newrelic.agent.record_log_event("A2A specialist URL not configured, skipping", level="WARNING", attributes={})
+        add_event("A2ASpecialistCall", {"status": "skipped", "reason": "not_configured"})
+        logger.warning("A2A specialist URL not configured, skipping")
         return {
             "status": "skipped",
             "reason": "A2A_SPECIALIST_URL is not configured",
@@ -54,15 +57,15 @@ def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
             )
             response.raise_for_status()
             result = response.json()
-            newrelic.agent.add_custom_attribute("a2a.attempt_count", attempt)
-            newrelic.agent.add_custom_attribute("a2a.status", "success")
-            newrelic.agent.record_custom_metric("Custom/A2A/RetryCount", attempt)
-            newrelic.agent.record_custom_event("A2ASpecialistCall", {"status": "success", "attempt": attempt})
-            newrelic.agent.record_log_event("A2A specialist call succeeded", level="INFO", attributes={"attempt": attempt, "url": str(A2A_SPECIALIST_URL or "")})
+            set_attribute("a2a.attempt_count", attempt)
+            set_attribute("a2a.status", "success")
+            record_metric("a2a.retry_count", attempt)
+            add_event("A2ASpecialistCall", {"status": "success", "attempt": attempt})
+            logger.info("A2A specialist call succeeded", extra={"attempt": attempt, "url": str(A2A_SPECIALIST_URL or "")})
             return result
         except (Timeout, ConnectionError) as e:
             if attempt == max_retries:
-                newrelic.agent.record_log_event("A2A specialist call timed out after all retries", level="ERROR", attributes={"attempt": attempt, "url": str(A2A_SPECIALIST_URL or ""), "error": str(e)[:255]})
+                logger.error("A2A specialist call timed out after all retries", extra={"attempt": attempt, "url": str(A2A_SPECIALIST_URL or ""), "error": str(e)[:255]})
                 return {
                     "status": "error",
                     "message": f"Temporary A2A outage after {attempt} retries: {e}",
@@ -75,7 +78,7 @@ def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
             if response is not None and 500 <= response.status_code < 600 and attempt < max_retries:
                 pass
             else:
-                newrelic.agent.record_log_event("A2A specialist call HTTP error", level="ERROR", attributes={"attempt": attempt, "error": str(e)[:255]})
+                logger.error("A2A specialist call HTTP error", extra={"attempt": attempt, "error": str(e)[:255]})
                 return {
                     "status": "error",
                     "message": f"A2A service error: {e}",
@@ -93,10 +96,10 @@ def request_specialist_review(state: dict[str, Any]) -> dict[str, Any]:
         sleep_seconds = backoff_factor * attempt
         time.sleep(sleep_seconds)
 
-    newrelic.agent.add_custom_attribute("a2a.status", "exhausted")
-    newrelic.agent.record_custom_metric("Custom/A2A/RetryCount", max_retries)
-    newrelic.agent.record_custom_event("A2ASpecialistCall", {"status": "error", "attempt": max_retries, "reason": "retry_exhausted"})
-    newrelic.agent.record_log_event("A2A specialist unavailable after all retries", level="ERROR", attributes={"max_retries": max_retries, "url": str(A2A_SPECIALIST_URL or "")})
+    set_attribute("a2a.status", "exhausted")
+    record_metric("a2a.retry_count", max_retries)
+    add_event("A2ASpecialistCall", {"status": "error", "attempt": max_retries, "reason": "retry_exhausted"})
+    logger.error("A2A specialist unavailable after all retries", extra={"max_retries": max_retries, "url": str(A2A_SPECIALIST_URL or "")})
     return {
         "status": "error",
         "message": "A2A specialist service unavailable after retries",

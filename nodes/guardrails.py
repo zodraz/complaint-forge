@@ -1,8 +1,11 @@
-import newrelic.agent
+import logging
 from types import SimpleNamespace
 from typing import Any
 
+from otel import add_event, function_trace, record_metric, set_attribute
 from response_evaluators import RESPONSE_QUALITY_EVALUATORS
+
+logger = logging.getLogger(__name__)
 
 
 def apply_guardrails(eval_results: dict[str, dict[str, Any]]) -> tuple[bool, str, dict[str, Any]]:
@@ -23,7 +26,7 @@ def apply_guardrails(eval_results: dict[str, dict[str, Any]]) -> tuple[bool, str
     return True, "All response quality guardrails passed", eval_results
 
 
-@newrelic.agent.function_trace()
+@function_trace()
 async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
     """
     Run response quality guardrails after the response draft and before external actions.
@@ -42,20 +45,20 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
             )
             eval_results[eval_name] = eval_output
             print(f"   {eval_name}: {eval_output.get('score', 'N/A')}")
-            newrelic.agent.record_custom_metric(f"Custom/Guardrail/{eval_name}/Score", eval_output.get("score", 0))
-            newrelic.agent.record_log_event(f"Guardrail evaluator completed: {eval_name}", level="INFO", attributes={"evaluator": eval_name, "score": eval_output.get("score", 0)})
+            record_metric(f"guardrail.{eval_name}.score", eval_output.get("score", 0))
+            logger.info(f"Guardrail evaluator completed: {eval_name}", extra={"evaluator": eval_name, "score": eval_output.get("score", 0)})
         except Exception as e:
             eval_results[eval_name] = {"score": 0, "reasoning": str(e)}
             print(f"   {eval_name} failed: {e}")
-            newrelic.agent.record_log_event(f"Guardrail evaluator failed: {eval_name}", level="ERROR", attributes={"evaluator": eval_name, "error": str(e)[:255]})
+            logger.error(f"Guardrail evaluator failed: {eval_name}", extra={"evaluator": eval_name, "error": str(e)[:255]})
 
     is_safe, guardrail_reason, guardrail_details = apply_guardrails(eval_results)
 
-    newrelic.agent.add_custom_attribute("guardrails.passed", is_safe)
+    set_attribute("guardrails.passed", is_safe)
     for eval_name in eval_results:
-        newrelic.agent.add_custom_attribute(f"guardrails.{eval_name}_score", eval_results.get(eval_name, {}).get("score", 0))
+        set_attribute(f"guardrails.{eval_name}_score", eval_results.get(eval_name, {}).get("score", 0))
 
-    newrelic.agent.record_custom_event("GuardrailResult", {
+    add_event("GuardrailResult", {
         "passed": is_safe,
         "reason": guardrail_reason[:255] if guardrail_reason else "",
         "empathy_score": eval_results.get("empathy_score", {}).get("score", 0),
@@ -63,9 +66,9 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
     })
 
     if is_safe:
-        newrelic.agent.record_log_event("All guardrails passed", level="INFO", attributes={"empathy_score": eval_results.get("empathy_score",{}).get("score",0), "resolution_score": eval_results.get("resolution_appropriateness",{}).get("score",0)})
+        logger.info("All guardrails passed", extra={"empathy_score": eval_results.get("empathy_score", {}).get("score", 0), "resolution_score": eval_results.get("resolution_appropriateness", {}).get("score", 0)})
     else:
-        newrelic.agent.record_log_event("Guardrail triggered, escalating complaint", level="WARNING", attributes={"reason": guardrail_reason[:255] if guardrail_reason else "", "empathy_score": eval_results.get("empathy_score",{}).get("score",0), "resolution_score": eval_results.get("resolution_appropriateness",{}).get("score",0)})
+        logger.warning("Guardrail triggered, escalating complaint", extra={"reason": guardrail_reason[:255] if guardrail_reason else "", "empathy_score": eval_results.get("empathy_score", {}).get("score", 0), "resolution_score": eval_results.get("resolution_appropriateness", {}).get("score", 0)})
 
     if not is_safe:
         print(f"GUARDRAIL TRIGGERED: {guardrail_reason}")

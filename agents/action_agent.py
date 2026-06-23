@@ -1,11 +1,16 @@
-import newrelic.agent
+import logging
+
+from otel import add_event, function_trace, record_metric, set_attribute
 from tools.salesforce_tool import (
     create_replacement_order,
     issue_credit,
     process_refund,
 )
 
-@newrelic.agent.function_trace()
+logger = logging.getLogger(__name__)
+
+
+@function_trace()
 def action_agent(state: dict) -> dict:
     """
     Executes real-world actions (refunds, credits, etc.)
@@ -16,7 +21,7 @@ def action_agent(state: dict) -> dict:
     resolution_type = resolution.get("resolution_type")
     refund_amount = resolution.get("refund_amount", 0)
 
-    newrelic.agent.add_custom_attribute("action.resolution_type", resolution_type)
+    set_attribute("action.resolution_type", resolution_type)
 
     # Execute refund if needed
     if resolution_type in ["full_refund", "partial_refund"] and refund_amount > 0:
@@ -32,15 +37,15 @@ def action_agent(state: dict) -> dict:
             "result": refund_result
         })
 
-        newrelic.agent.record_custom_metric("Custom/Action/RefundAmount", refund_amount)
-        newrelic.agent.record_custom_event("ActionTaken", {
+        record_metric("action.refund_amount", refund_amount)
+        add_event("ActionTaken", {
             "action": "refund",
             "amount": refund_amount,
             "status": refund_result.get("status") if isinstance(refund_result, dict) else refund_result,
         })
-        newrelic.agent.record_log_event("Refund case created in Salesforce", level="INFO", attributes={"amount": refund_amount, "status": refund_result.get("status",""), "case_id": refund_result.get("case_id","")})
+        logger.info("Refund case created in Salesforce", extra={"amount": refund_amount, "status": refund_result.get("status", ""), "case_id": refund_result.get("case_id", "")})
 
-    # Credit action (simulate)
+    # Credit action
     if resolution.get("credit_amount", 0) > 0:
         credit_result = issue_credit(
             customer_history=state.get("customer_history", {}),
@@ -53,13 +58,13 @@ def action_agent(state: dict) -> dict:
             "result": credit_result
         })
 
-        newrelic.agent.record_custom_metric("Custom/Action/CreditAmount", resolution["credit_amount"])
-        newrelic.agent.record_custom_event("ActionTaken", {
+        record_metric("action.credit_amount", resolution["credit_amount"])
+        add_event("ActionTaken", {
             "action": "credit",
             "amount": resolution["credit_amount"],
             "status": credit_result.get("status") if isinstance(credit_result, dict) else credit_result,
         })
-        newrelic.agent.record_log_event("Credit case created in Salesforce", level="INFO", attributes={"amount": resolution["credit_amount"], "status": credit_result.get("status","")})
+        logger.info("Credit case created in Salesforce", extra={"amount": resolution["credit_amount"], "status": credit_result.get("status", "")})
 
     # Replacement action
     if resolution_type == "replacement":
@@ -69,11 +74,11 @@ def action_agent(state: dict) -> dict:
             "result": replacement_result
         })
 
-        newrelic.agent.record_custom_event("ActionTaken", {
+        add_event("ActionTaken", {
             "action": "replacement",
             "status": replacement_result.get("status") if isinstance(replacement_result, dict) else replacement_result,
         })
-        newrelic.agent.record_log_event("Replacement order task created in Salesforce", level="INFO", attributes={"status": replacement_result.get("status","")})
+        logger.info("Replacement order task created in Salesforce", extra={"status": replacement_result.get("status", "")})
 
     # Log escalation
     if resolution_type == "escalate":
@@ -83,13 +88,13 @@ def action_agent(state: dict) -> dict:
             "reason": reason
         })
 
-        newrelic.agent.record_custom_event("ActionTaken", {
+        add_event("ActionTaken", {
             "action": "escalate_to_human",
             "reason": (reason[:255] if isinstance(reason, str) else reason),
         })
-        newrelic.agent.record_log_event("Escalating to human review", level="WARNING", attributes={"reason": str(resolution.get("action_needed",""))[:255]})
+        logger.warning("Escalating to human review", extra={"reason": str(resolution.get("action_needed", ""))[:255]})
 
-    newrelic.agent.add_custom_attribute("action.actions_count", len(actions_taken))
-    newrelic.agent.record_custom_metric("Custom/Action/ActionsPerComplaint", len(actions_taken))
+    set_attribute("action.actions_count", len(actions_taken))
+    record_metric("action.actions_per_complaint", len(actions_taken))
 
     return {"actions_taken": actions_taken}

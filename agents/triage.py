@@ -1,12 +1,13 @@
-import newrelic.agent
+import logging
 
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
 from llm_factory import get_chat_llm
+from otel import add_event, function_trace, notice_error, record_metric, set_attribute
 from prompts.system_prompts import TRIAGE_PROMPT
 
-
+logger = logging.getLogger(__name__)
 llm = get_chat_llm(temperature=0, request_timeout=20)
 
 
@@ -18,7 +19,7 @@ class TriageResult(BaseModel):
     order_id: str | None = Field(default=None, description="Order id if found.")
 
 
-@newrelic.agent.function_trace()
+@function_trace()
 def triage(state: dict) -> dict:
     prompt = ChatPromptTemplate.from_template(TRIAGE_PROMPT)
     chain = prompt | llm.with_structured_output(TriageResult)
@@ -26,8 +27,8 @@ def triage(state: dict) -> dict:
     try:
         result = chain.invoke({"input": state["complaint"]}).model_dump()
     except Exception as exc:
-        newrelic.agent.notice_error()
-        newrelic.agent.record_log_event("Triage LLM unavailable, using fallback", level="WARNING", attributes={"error": str(exc)})
+        notice_error()
+        logger.warning("Triage LLM unavailable, using fallback", extra={"error": str(exc)})
         result = {
             "is_complaint": False,
             "confidence": 0.0,
@@ -36,11 +37,11 @@ def triage(state: dict) -> dict:
             "order_id": None,
         }
 
-    newrelic.agent.add_custom_attribute("triage.is_complaint", result["is_complaint"])
-    newrelic.agent.add_custom_attribute("triage.confidence", result["confidence"])
-    newrelic.agent.record_custom_metric("Custom/Triage/Confidence", result["confidence"])
-    newrelic.agent.record_custom_metric("Custom/Triage/IsComplaint", 1 if result["is_complaint"] else 0)
-    newrelic.agent.record_custom_event("TriageResult", {
+    set_attribute("triage.is_complaint", result["is_complaint"])
+    set_attribute("triage.confidence", result["confidence"])
+    record_metric("triage.confidence", result["confidence"])
+    record_metric("triage.is_complaint", 1 if result["is_complaint"] else 0)
+    add_event("TriageResult", {
         "is_complaint": result["is_complaint"],
         "confidence": result["confidence"],
         "reason": result["reason"][:255],
@@ -49,9 +50,9 @@ def triage(state: dict) -> dict:
     })
 
     if result.get("is_complaint"):
-        newrelic.agent.record_log_event("Ticket classified as complaint", level="INFO", attributes={"confidence": result.get("confidence", 0.0), "order_id": result.get("order_id")})
+        logger.info("Ticket classified as complaint", extra={"confidence": result.get("confidence", 0.0), "order_id": result.get("order_id")})
     else:
-        newrelic.agent.record_log_event("Ticket classified as non-complaint, will be ignored", level="INFO", attributes={"confidence": result.get("confidence", 0.0), "reason": str(result.get("reason",""))[:255]})
+        logger.info("Ticket classified as non-complaint, will be ignored", extra={"confidence": result.get("confidence", 0.0), "reason": str(result.get("reason", ""))[:255]})
 
     return {
         "triage": result,

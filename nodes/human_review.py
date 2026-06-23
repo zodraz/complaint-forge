@@ -1,19 +1,23 @@
-import newrelic.agent
+import logging
+
 from langgraph.types import interrupt
+from otel import add_event, function_trace, record_metric, set_attribute
+
+logger = logging.getLogger(__name__)
 
 
-@newrelic.agent.function_trace()
+@function_trace()
 def human_review(state: dict) -> dict:
     resolution = state.get("resolution", {})
 
-    newrelic.agent.add_custom_attribute("human_review.reason", str(resolution.get("action_needed", ""))[:255])
-    newrelic.agent.record_custom_metric("Custom/HumanReview/Triggered", 1)
-    newrelic.agent.record_custom_event("HumanReviewTriggered", {
+    set_attribute("human_review.reason", str(resolution.get("action_needed", ""))[:255])
+    record_metric("human_review.triggered", 1)
+    add_event("HumanReviewTriggered", {
         "reason": str(resolution.get("action_needed", "Escalation requested"))[:255],
         "resolution_type": resolution.get("resolution_type", ""),
         "has_specialist_review": bool(state.get("specialist_review")),
     })
-    newrelic.agent.record_log_event("Human review required, workflow paused", level="WARNING", attributes={"reason": str(resolution.get("action_needed","Escalation requested"))[:255], "resolution_type": resolution.get("resolution_type",""), "customer_email": str(state.get("customer_email",""))})
+    logger.warning("Human review required, workflow paused", extra={"reason": str(resolution.get("action_needed", "Escalation requested"))[:255], "resolution_type": resolution.get("resolution_type", ""), "customer_email": str(state.get("customer_email", ""))})
 
     review = interrupt({
         "reason": resolution.get("action_needed", "Escalation requested"),

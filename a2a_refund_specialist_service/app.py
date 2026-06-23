@@ -1,8 +1,18 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import newrelic.agent
-newrelic.agent.initialize()
+import logging
+from otel import (
+    setup_otel,
+    instrument_fastapi,
+    add_event,
+    function_trace,
+    notice_error,
+    record_metric,
+    set_attribute,
+)
+
+setup_otel("complaintforge-a2a-specialist")
 
 import json
 import os
@@ -14,11 +24,14 @@ from pydantic import BaseModel, Field
 
 from llm_factory import get_chat_llm
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="Refund Specialist A2A Service",
     description="CrewAI-powered specialist reviewer for ComplaintForge escalations",
     version="0.1.0",
 )
+instrument_fastapi(app)
 
 AUTH_TOKEN = os.getenv("A2A_SPECIALIST_AUTH_TOKEN")
 
@@ -86,14 +99,14 @@ def _crewai_import_failure_reason(error: Exception) -> str:
     return reason
 
 
-@newrelic.agent.function_trace()
+@function_trace()
 async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
     try:
         from crewai import Agent, Crew, Process, Task
     except Exception as e:
-        newrelic.agent.notice_error()
-        newrelic.agent.record_custom_event("CrewAIReview", {"status": "import_failed", "source": "fallback"})
-        newrelic.agent.record_log_event("CrewAI import failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
+        notice_error()
+        add_event("CrewAIReview", {"status": "import_failed", "source": "fallback"})
+        logger.error("CrewAI import failed, returning fallback recommendation", extra={"error": str(e)[:255]})
         return _fallback_recommendation(_crewai_import_failure_reason(e))
 
     try:
@@ -136,27 +149,27 @@ async def run_crewai_review(request: SpecialistRequest) -> dict[str, Any]:
             verbose=True,
         )
     except Exception as e:
-        newrelic.agent.notice_error()
-        newrelic.agent.record_custom_event("CrewAIReview", {"status": "setup_failed", "source": "fallback"})
-        newrelic.agent.record_log_event("CrewAI setup failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
+        notice_error()
+        add_event("CrewAIReview", {"status": "setup_failed", "source": "fallback"})
+        logger.error("CrewAI setup failed, returning fallback recommendation", extra={"error": str(e)[:255]})
         return _fallback_recommendation(f"CrewAI setup failed: {e}")
 
     try:
         output = await crew.kickoff_async()
         raw = getattr(output, "raw", str(output))
-        newrelic.agent.add_custom_attribute("crewai.source", "crewai")
-        newrelic.agent.record_custom_event("CrewAIReview", {"status": "success", "source": "crewai"})
-        newrelic.agent.record_custom_metric("Custom/A2A/CrewAISuccess", 1)
-        newrelic.agent.record_log_event("CrewAI specialist review completed successfully", level="INFO", attributes={"source": "crewai"})
+        set_attribute("crewai.source", "crewai")
+        add_event("CrewAIReview", {"status": "success", "source": "crewai"})
+        record_metric("a2a.crewai_success", 1)
+        logger.info("CrewAI specialist review completed successfully", extra={"source": "crewai"})
         return {
             "status": "success",
             "source": "crewai",
             "recommendation": _extract_json(raw),
         }
     except Exception as e:
-        newrelic.agent.notice_error()
-        newrelic.agent.record_custom_event("CrewAIReview", {"status": "execution_failed", "source": "fallback"})
-        newrelic.agent.record_log_event("CrewAI execution failed, returning fallback recommendation", level="ERROR", attributes={"error": str(e)[:255]})
+        notice_error()
+        add_event("CrewAIReview", {"status": "execution_failed", "source": "fallback"})
+        logger.error("CrewAI execution failed, returning fallback recommendation", extra={"error": str(e)[:255]})
         return _fallback_recommendation(f"CrewAI execution failed: {e}")
 
 
@@ -182,8 +195,8 @@ async def refund_specialist(
     authorization: str | None = Header(default=None),
 ):
     _authorize(authorization)
-    newrelic.agent.add_custom_attribute("specialist.has_order_id", bool(request.order_id))
-    newrelic.agent.add_custom_attribute("specialist.has_customer_email", bool(request.customer_email))
+    set_attribute("specialist.has_order_id", bool(request.order_id))
+    set_attribute("specialist.has_customer_email", bool(request.customer_email))
     return await run_crewai_review(request)
 
 
