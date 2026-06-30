@@ -24,6 +24,20 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
 
+class _ExtraFormatter(logging.Formatter):
+    # Standard LogRecord fields to exclude from the extras suffix
+    _BASELINE = frozenset(logging.LogRecord("", 0, "", 0, "", (), None).__dict__) | {
+        "message", "asctime",
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        base = super().format(record)
+        extras = {k: v for k, v in record.__dict__.items() if k not in self._BASELINE}
+        if extras:
+            base += " | " + " ".join(f"{k}={v}" for k, v in sorted(extras.items()))
+        return base
+
+
 def setup_otel(service_name: str) -> None:
     """Configure TracerProvider, MeterProvider, and auto-instrumentation."""
     resource = Resource.create({SERVICE_NAME: service_name})
@@ -41,7 +55,7 @@ def setup_otel(service_name: str) -> None:
     set_logger_provider(logger_provider)
     handler = LoggingHandler(level=logging.NOTSET, logger_provider=logger_provider)
     stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+    stream_handler.setFormatter(_ExtraFormatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
     root = logging.getLogger()
     root.addHandler(handler)
     root.addHandler(stream_handler)
