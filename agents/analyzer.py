@@ -31,6 +31,7 @@ URGENCY_LEVELS = {"low": 1, "medium": 2, "high": 3}
 
 @function_trace()
 def analyzer(state: dict) -> dict:
+    logger.info("Analyzer starting")
     prompt = ChatPromptTemplate.from_template(ANALYZER_PROMPT)
     chain = prompt | llm.with_structured_output(AnalysisResult)
     result = chain.invoke({

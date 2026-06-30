@@ -1,9 +1,12 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from typing import TypedDict, Annotated, Any
+import logging
 import operator
 from dotenv import load_dotenv
 import os
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -92,19 +95,27 @@ def human_review_node(state: ComplaintState):
     return human_review(state)
 
 def route_after_resolver(state: ComplaintState):
-    if state.get("resolution", {}).get("resolution_type") == "escalate":
+    resolution_type = state.get("resolution", {}).get("resolution_type")
+    if resolution_type == "escalate":
+        logger.info("Route: policy → specialist_review (escalate)")
         return "specialist_review"
+    logger.info("Route: policy → responder", extra={"resolution_type": resolution_type})
     return "responder"
 
 def route_after_guardrails(state: ComplaintState):
-    if state.get("resolution", {}).get("resolution_type") == "escalate":
+    resolution_type = state.get("resolution", {}).get("resolution_type")
+    if resolution_type == "escalate":
+        logger.info("Route: guardrails → specialist_review (guardrail escalation)")
         return "specialist_review"
+    logger.info("Route: guardrails → action", extra={"resolution_type": resolution_type})
     return "action"
 
 def route_after_triage(state: ComplaintState):
     triage_result = state.get("triage", {})
     if triage_result.get("is_complaint") is True:
+        logger.info("Route: triage → customer_context", extra={"confidence": triage_result.get("confidence", 0.0)})
         return "customer_context"
+    logger.info("Route: triage → ignored", extra={"confidence": triage_result.get("confidence", 0.0), "reason": str(triage_result.get("reason", ""))[:120]})
     return "ignored"
 
 def ignored_node(state: ComplaintState):

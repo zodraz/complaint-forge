@@ -21,6 +21,7 @@ class TriageResult(BaseModel):
 
 @function_trace()
 def triage(state: dict) -> dict:
+    logger.info("Triage starting")
     prompt = ChatPromptTemplate.from_template(TRIAGE_PROMPT)
     chain = prompt | llm.with_structured_output(TriageResult)
 

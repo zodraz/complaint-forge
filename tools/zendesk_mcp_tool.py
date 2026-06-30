@@ -1,6 +1,8 @@
+import logging
 import os
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
 ZENDESK_MCP_URL = os.getenv("ZENDESK_MCP_URL")
 ZENDESK_MCP_AUTH_TOKEN = os.getenv("ZENDESK_MCP_AUTH_TOKEN")
@@ -63,6 +65,7 @@ async def update_ticket_status_via_mcp(
         }
 
     if not ZENDESK_MCP_URL:
+        logger.warning("Zendesk MCP update skipped — ZENDESK_MCP_URL not configured", extra={"ticket_id": ticket_id})
         return {
             "status": "skipped",
             "reason": "ZENDESK_MCP_URL is not configured",
@@ -70,11 +73,14 @@ async def update_ticket_status_via_mcp(
             "payload": payload,
         }
 
+    logger.info("Zendesk MCP ticket update starting", extra={"ticket_id": ticket_id, "status": target_status, "tool": ZENDESK_MCP_UPDATE_TICKET_TOOL})
+
     try:
         import httpx
         from mcp import ClientSession
         from mcp.client.streamable_http import streamable_http_client
     except ImportError as e:
+        logger.error("Zendesk MCP import failed", extra={"ticket_id": ticket_id, "error": str(e)[:255]})
         return {
             "status": "error",
             "message": f"Missing MCP client dependency: {e}",
@@ -107,8 +113,10 @@ async def update_ticket_status_via_mcp(
             "mcp_tool": ZENDESK_MCP_UPDATE_TICKET_TOOL,
             "payload": payload,
         })
+        logger.info("Zendesk MCP ticket updated successfully", extra={"ticket_id": ticket_id, "status": target_status})
         return parsed
     except Exception as e:
+        logger.error("Zendesk MCP ticket update failed", extra={"ticket_id": ticket_id, "error": str(e)[:255]})
         return {
             "status": "error",
             "message": str(e),

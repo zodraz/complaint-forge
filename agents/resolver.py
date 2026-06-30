@@ -33,6 +33,7 @@ def resolver(state: dict) -> dict:
     """
     Decides the best resolution based on policy + customer history + analysis
     """
+    logger.info("Resolver starting", extra={"urgency": state.get("analysis", {}).get("urgency", ""), "issue_type": state.get("analysis", {}).get("issue_type", "")})
     prompt = ChatPromptTemplate.from_template(RESOLVER_PROMPT)
 
     chain = prompt | llm.with_structured_output(ResolutionResult)

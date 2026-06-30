@@ -15,6 +15,7 @@ def responder(state: dict) -> dict:
     """
     Writes the final empathetic response to the customer
     """
+    logger.info("Responder starting", extra={"resolution_type": state.get("resolution", {}).get("resolution_type", "")})
     prompt = ChatPromptTemplate.from_template(RESPONDER_PROMPT)
 
     chain = prompt | llm

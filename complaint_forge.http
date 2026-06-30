@@ -1,6 +1,7 @@
-@baseUrl = http://localhost:8000
-@a2aBaseUrl = http://localhost:8010
-@threadId = paste-thread-id-here
+@baseUrl = https://ca-complaint-handler.delightfulsky-f137e0ce.northeurope.azurecontainerapps.io
+
+@threadId = b9559f59-213b-4f34-a9bb-2c5a337833af
+
 @a2aToken = ou8oMIO9O7VB-NVrN6vN8UFR7dq5V6GsbsDkpv4u6720L1QH3nx7xfiIIlhJ9CRK
 
 ### Health check

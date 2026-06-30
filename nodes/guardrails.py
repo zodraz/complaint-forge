@@ -34,7 +34,7 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
     result = dict(state)
     complaint_text = state.get("complaint", "")
 
-    print("Running response quality evaluators...")
+    logger.info("Guardrails starting", extra={"evaluator_count": len(RESPONSE_QUALITY_EVALUATORS)})
     eval_results = {}
 
     for eval_name, evaluator_func in RESPONSE_QUALITY_EVALUATORS.items():
@@ -44,13 +44,11 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
                 SimpleNamespace(inputs={"complaint": complaint_text}, outputs=result),
             )
             eval_results[eval_name] = eval_output
-            print(f"   {eval_name}: {eval_output.get('score', 'N/A')}")
             record_metric(f"guardrail.{eval_name}.score", eval_output.get("score", 0))
-            logger.info(f"Guardrail evaluator completed: {eval_name}", extra={"evaluator": eval_name, "score": eval_output.get("score", 0)})
+            logger.info("Guardrail evaluator completed", extra={"evaluator": eval_name, "score": eval_output.get("score", 0)})
         except Exception as e:
             eval_results[eval_name] = {"score": 0, "reasoning": str(e)}
-            print(f"   {eval_name} failed: {e}")
-            logger.error(f"Guardrail evaluator failed: {eval_name}", extra={"evaluator": eval_name, "error": str(e)[:255]})
+            logger.error("Guardrail evaluator failed", extra={"evaluator": eval_name, "error": str(e)[:255]})
 
     is_safe, guardrail_reason, guardrail_details = apply_guardrails(eval_results)
 
@@ -71,7 +69,6 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
         logger.warning("Guardrail triggered, escalating complaint", extra={"reason": guardrail_reason[:255] if guardrail_reason else "", "empathy_score": eval_results.get("empathy_score", {}).get("score", 0), "resolution_score": eval_results.get("resolution_appropriateness", {}).get("score", 0)})
 
     if not is_safe:
-        print(f"GUARDRAIL TRIGGERED: {guardrail_reason}")
         return {
             "resolution": {
                 "resolution_type": "escalate",
@@ -92,5 +89,4 @@ async def guardrails(state: dict[str, Any]) -> dict[str, Any]:
             "eval_results": eval_results,
         }
 
-    print("All guardrails passed")
     return {"eval_results": eval_results}

@@ -195,6 +195,7 @@ async def refund_specialist(
     authorization: str | None = Header(default=None),
 ):
     _authorize(authorization)
+    logger.info("Specialist review request received", extra={"customer_email": str(request.customer_email or ""), "order_id": str(request.order_id or ""), "resolution_type": request.resolution.get("resolution_type", "")})
     set_attribute("specialist.has_order_id", bool(request.order_id))
     set_attribute("specialist.has_customer_email", bool(request.customer_email))
     return await run_crewai_review(request)

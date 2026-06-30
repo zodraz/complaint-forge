@@ -119,7 +119,7 @@ async def process_complaint_async(
     thread_id: str | None = None,
 ):
     """Clean version: Graph execution + Post-processing separated"""
-    print(f"Processing Zendesk Ticket #{ticket_id} from {email}")
+    logger.info("Processing Zendesk ticket", extra={"ticket_id": ticket_id, "email": email})
 
     thread_id = thread_id or str(uuid.uuid4())
     config = _graph_config(thread_id)
@@ -153,7 +153,7 @@ async def process_complaint_async(
             record_metric("complaint.pending_review", 1)
             add_event("ComplaintWorkflowPaused", {"thread_id": thread_id, "ticket_id": ticket_id})
             logger.warning("Complaint workflow paused for human review", extra={"thread_id": thread_id, "ticket_id": ticket_id})
-            print(f"Ticket #{ticket_id} paused for human review")
+            logger.warning("Ticket paused for human review", extra={"ticket_id": ticket_id, "thread_id": thread_id})
             return {
                 "status": "pending_review",
                 "thread_id": thread_id,
@@ -166,7 +166,7 @@ async def process_complaint_async(
             result=result,
         )
 
-        print(f"Ticket #{ticket_id} processed successfully")
+        logger.info("Ticket processed successfully", extra={"ticket_id": ticket_id, "thread_id": thread_id})
         set_attribute("complaint.status", "completed")
         record_metric("complaint.completed", 1)
         add_event("ComplaintWorkflowCompleted", {"thread_id": thread_id, "ticket_id": ticket_id})
@@ -177,7 +177,7 @@ async def process_complaint_async(
         notice_error()
         logger.error("Complaint workflow failed with exception", extra={"thread_id": thread_id, "ticket_id": ticket_id, "error": str(e)[:255]})
         _record_run(thread_id, status="error", error=str(e))
-        print(f"Error processing ticket #{ticket_id}: {e}")
+        logger.error("Unhandled error processing ticket", extra={"ticket_id": ticket_id, "thread_id": thread_id, "error": str(e)[:255]})
         raise
 
 
@@ -228,7 +228,7 @@ async def zendesk_complaint_webhook(
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Webhook error: {e}")
+        logger.error("Webhook processing error", extra={"error": str(e)[:255]})
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -327,6 +327,5 @@ async def health():
 
 @app.on_event("startup")
 async def startup_event():
-    print("ComplaintForge Autonomous Complaint Handler started")
-    print("Webhook: /webhook/zendesk/complaint")
-    print("Test: /test/complaint")
+    logger.info("ComplaintForge Autonomous Complaint Handler started")
+    logger.info("Endpoints ready", extra={"webhook": "/webhook/zendesk/complaint", "test": "/test/complaint"})

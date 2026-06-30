@@ -34,6 +34,8 @@ def policy(state: dict[str, Any]) -> dict[str, Any]:
     confidence = float(resolution.get("confidence") or 0)
     is_excluded_product = _complaint_mentions_excluded_product(complaint, analysis)
 
+    logger.info("Policy check starting", extra={"resolution_type": resolution.get("resolution_type", ""), "refund_amount": refund_amount, "confidence": confidence})
+
     _append_reason(
         reasons,
         confidence < 0.85,

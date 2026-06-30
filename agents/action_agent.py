@@ -21,6 +21,7 @@ def action_agent(state: dict) -> dict:
     resolution_type = resolution.get("resolution_type")
     refund_amount = resolution.get("refund_amount", 0)
 
+    logger.info("Action agent starting", extra={"resolution_type": resolution_type, "refund_amount": refund_amount, "credit_amount": resolution.get("credit_amount", 0)})
     set_attribute("action.resolution_type", resolution_type)
 
     # Execute refund if needed

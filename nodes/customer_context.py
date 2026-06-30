@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 def customer_context(state: dict) -> dict:
     email = state.get("customer_email")
     order_id = state.get("order_id")
+    logger.info("Customer context starting", extra={"email": str(email or ""), "order_id": str(order_id or "")})
     history = get_customer_history(email, order_id=order_id) if email else {}
     phone = history.get("phone") or state.get("customer_phone") or state.get("recipient_phone")
 
