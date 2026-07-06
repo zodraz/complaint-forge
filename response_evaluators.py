@@ -26,7 +26,7 @@ Criteria:
 Return only a JSON:
 {{"score": 8.5, "reasoning": "short explanation"}}"""
 
-    llm = get_chat_llm(temperature=0)
+    llm = get_chat_llm(temperature=1)
 
     result = llm.invoke(prompt).content
     try:
@@ -48,7 +48,7 @@ Chosen Resolution: {resolution}
 Return JSON:
 {{"score": 9, "reasoning": "..."}}"""
 
-    llm = get_chat_llm(temperature=0)
+    llm = get_chat_llm(temperature=1)
     result = llm.invoke(prompt).content
     try:
         return json.loads(result)

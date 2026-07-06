@@ -7,7 +7,7 @@ from otel import function_trace, record_metric, set_attribute
 from prompts.system_prompts import RESPONDER_PROMPT
 
 logger = logging.getLogger(__name__)
-llm = get_chat_llm(temperature=0.3)  # slight creativity for tone
+llm = get_chat_llm(temperature=1)  # slight creativity for tone
 
 
 @function_trace()

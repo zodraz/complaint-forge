@@ -5,12 +5,13 @@ from typing import Literal
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from config import USE_LITELLM
 from llm_factory import get_chat_llm
 from otel import add_event, function_trace, record_metric, set_attribute
 from prompts.system_prompts import RESOLVER_PROMPT
 
 logger = logging.getLogger(__name__)
-llm = get_chat_llm(temperature=0)
+llm = get_chat_llm(temperature=1)
 
 
 class ResolutionResult(BaseModel):
@@ -36,7 +37,8 @@ def resolver(state: dict) -> dict:
     logger.info("Resolver starting", extra={"urgency": state.get("analysis", {}).get("urgency", ""), "issue_type": state.get("analysis", {}).get("issue_type", "")})
     prompt = ChatPromptTemplate.from_template(RESOLVER_PROMPT)
 
-    chain = prompt | llm.with_structured_output(ResolutionResult)
+    llm_with_output = llm.with_structured_output(ResolutionResult, method="json_schema", strict=True) if USE_LITELLM else llm.with_structured_output(ResolutionResult)
+    chain = prompt | llm_with_output
 
     result = chain.invoke({
         "history": json.dumps(state.get("customer_history", {}), indent=2),

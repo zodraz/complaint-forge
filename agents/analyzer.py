@@ -5,12 +5,13 @@ from typing import Literal
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from config import USE_LITELLM
 from llm_factory import get_chat_llm
 from otel import add_event, function_trace, record_metric, set_attribute
 from prompts.system_prompts import ANALYZER_PROMPT
 
 logger = logging.getLogger(__name__)
-llm = get_chat_llm(temperature=0)
+llm = get_chat_llm(temperature=1)
 
 
 class AnalysisResult(BaseModel):
@@ -33,7 +34,8 @@ URGENCY_LEVELS = {"low": 1, "medium": 2, "high": 3}
 def analyzer(state: dict) -> dict:
     logger.info("Analyzer starting")
     prompt = ChatPromptTemplate.from_template(ANALYZER_PROMPT)
-    chain = prompt | llm.with_structured_output(AnalysisResult)
+    llm_with_output = llm.with_structured_output(AnalysisResult, method="json_schema", strict=True) if USE_LITELLM else llm.with_structured_output(AnalysisResult)
+    chain = prompt | llm_with_output
     result = chain.invoke({
         "complaint": state["complaint"],
         "history": json.dumps(state.get("customer_history", {}))

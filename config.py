@@ -22,3 +22,8 @@ MAILCHIMP_FROM_EMAIL = os.getenv("MAILCHIMP_FROM_EMAIL")
 MAILCHIMP_TIMEOUT = float(os.getenv("MAILCHIMP_TIMEOUT", "30"))
 
 OUTBOUND_COMMUNICATION_ENABLED = os.getenv("OUTBOUND_COMMUNICATION_ENABLED", "true").lower() == "true"
+
+USE_LITELLM = os.getenv("USE_LITELLM", "false").lower() == "true"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "http://localhost:4000")
+LITELLM_API_KEY = os.getenv("LITELLM_API_KEY", "sk-1234")
+LITELLM_MODEL = os.getenv("LITELLM_MODEL", "gpt-4o")

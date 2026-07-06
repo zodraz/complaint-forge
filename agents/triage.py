@@ -3,12 +3,13 @@ import logging
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from config import USE_LITELLM
 from llm_factory import get_chat_llm
 from otel import add_event, function_trace, notice_error, record_metric, set_attribute
 from prompts.system_prompts import TRIAGE_PROMPT
 
 logger = logging.getLogger(__name__)
-llm = get_chat_llm(temperature=0, request_timeout=20)
+llm = get_chat_llm(temperature=1, request_timeout=20)
 
 
 class TriageResult(BaseModel):
@@ -23,7 +24,9 @@ class TriageResult(BaseModel):
 def triage(state: dict) -> dict:
     logger.info("Triage starting")
     prompt = ChatPromptTemplate.from_template(TRIAGE_PROMPT)
-    chain = prompt | llm.with_structured_output(TriageResult)
+
+    llm_with_output = llm.with_structured_output(TriageResult, method="json_schema", strict=True) if USE_LITELLM else llm.with_structured_output(TriageResult)
+    chain = prompt | llm_with_output
 
     try:
         result = chain.invoke({"input": state["complaint"]}).model_dump()

@@ -4,6 +4,10 @@ from config import (
     AZURE_OPENAI_API_KEY,
     AZURE_OPENAI_DEPLOYMENT_NAME,
     AZURE_OPENAI_ENDPOINT,
+    LITELLM_API_KEY,
+    LITELLM_BASE_URL,
+    LITELLM_MODEL,
+    USE_LITELLM,
 )
 
 
@@ -15,6 +19,18 @@ def _azure_openai_base_url() -> str:
 
 
 def get_chat_llm(*, temperature: float = 0, request_timeout: float | None = None) -> ChatOpenAI:
+    if USE_LITELLM:
+        kwargs = {
+            "model": LITELLM_MODEL,
+            "base_url": LITELLM_BASE_URL,
+            "api_key": LITELLM_API_KEY,
+            "default_headers":{"x-litellm-model": LITELLM_MODEL},
+            "temperature": temperature,
+        }
+        if request_timeout is not None:
+            kwargs["request_timeout"] = request_timeout
+        return ChatOpenAI(**kwargs)
+
     missing = [
         name
         for name, value in {
