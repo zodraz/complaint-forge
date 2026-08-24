@@ -1,0 +1,559 @@
+openapi: 3.1.0
+info:
+  title: ComplaintForge — Complaint Handler API
+  description: |
+    LangGraph-powered autonomous complaint processing service.
+    Ingests Zendesk complaint webhooks, orchestrates a 12-node AI workflow for
+    triage, enrichment, resolution, and communication, and exposes a REST API
+    for human review management.
+  version: 1.0.0
+  contact:
+    name: ComplaintForge
+
+servers:
+  - url: https://complaintforge.{region}.azurecontainerapps.io
+    description: Azure Container Apps — production
+    variables:
+      region:
+        default: northeurope
+        description: Azure region
+  - url: http://localhost:8000
+    description: Local development
+
+tags:
+  - name: Webhook
+    description: Zendesk webhook ingestion
+  - name: Testing
+    description: Developer testing endpoints
+  - name: Review
+    description: Human-in-the-loop review management
+  - name: Operations
+    description: Service health and operations
+
+paths:
+
+  /webhook/zendesk/complaint:
+    post:
+      operationId: receiveZendeskComplaint
+      tags: [Webhook]
+      summary: Receive Zendesk complaint ticket webhook
+      description: |
+        Primary inbound interface. Accepts a Zendesk ticket webhook payload,
+        validates that description and requester email are present, assigns a
+        UUID thread ID, and queues the complaint for asynchronous LangGraph
+        workflow processing. Returns 202 immediately; processing runs in the
+        background.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZendeskWebhookPayload'
+            examples:
+              standard_complaint:
+                summary: Typical Zendesk complaint webhook
+                value:
+                  ticket:
+                    id: 12345
+                    subject: "My order never arrived"
+                    description: "I ordered item #ABC-001 three weeks ago and have not received it."
+                    requester:
+                      email: "customer@example.com"
+              comment_body_variant:
+                summary: Webhook with comment body (alternative Zendesk format)
+                value:
+                  ticket:
+                    id: 67890
+                    subject: "Refund request"
+                    comment:
+                      body: "I was charged twice for my order."
+                    requester:
+                      email: "user@example.com"
+      responses:
+        '202':
+          description: Complaint accepted and queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookAcceptedResponse'
+              example:
+                status: accepted
+                ticket_id: 12345
+                thread_id: "550e8400-e29b-41d4-a716-446655440000"
+                message: "Complaint received and being processed autonomously"
+        '400':
+          description: Missing required fields (description or requester email)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "Missing description or email"
+        '500':
+          description: Unexpected server error while parsing the webhook payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+
+  /test/complaint:
+    post:
+      operationId: testComplaint
+      tags: [Testing]
+      summary: Submit a test complaint (synchronous)
+      description: |
+        Developer test endpoint. Accepts a raw complaint text and email address,
+        runs the full LangGraph workflow synchronously (using a fixed ticket_id of
+        9999), and returns the complete result or a pending review state if the
+        workflow suspends at a human review interrupt.
+        Use this endpoint for integration testing without a live Zendesk webhook.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestComplaintRequest'
+            example:
+              complaint: "I received a damaged product and want a full refund."
+              email: "tester@example.com"
+      responses:
+        '200':
+          description: Workflow completed or paused at human review interrupt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowOutcome'
+              examples:
+                completed:
+                  summary: Auto-resolved workflow
+                  value:
+                    status: completed
+                    thread_id: "550e8400-e29b-41d4-a716-446655440000"
+                    result:
+                      resolution_type: full_refund
+                      refund_amount: 49.99
+                      final_response: "We have processed your full refund of $49.99."
+                pending_review:
+                  summary: Workflow paused for human review
+                  value:
+                    status: pending_review
+                    thread_id: "550e8400-e29b-41d4-a716-446655440001"
+                    interrupts:
+                      - id: "intr-001"
+                        value:
+                          complaint: "I ordered a custom item..."
+                          resolution: {resolution_type: escalate}
+        '400':
+          description: Missing complaint text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "complaint text is required"
+
+  /review:
+    get:
+      operationId: listPendingReviews
+      tags: [Review]
+      summary: List all pending human review threads
+      description: |
+        Returns all workflow threads currently paused at a LangGraph human review
+        interrupt, awaiting a decision from a support agent.
+      responses:
+        '200':
+          description: List of pending review thread summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewListResponse'
+              example:
+                reviews:
+                  - thread_id: "550e8400-e29b-41d4-a716-446655440000"
+                    status: pending_review
+                    ticket_id: 12345
+                    requester_email: "customer@example.com"
+                    interrupts:
+                      - id: "intr-001"
+                        value: {complaint: "I want a refund for order #123"}
+
+  /review/{thread_id}:
+    get:
+      operationId: getReviewDetail
+      tags: [Review]
+      summary: Get full review packet for a paused thread
+      description: |
+        Returns the complete LangGraph state snapshot and interrupt payload for the
+        specified thread, including complaint text, customer CRM history, AI analysis,
+        resolution proposal, specialist advisory recommendation, and the list of next
+        nodes awaiting execution.
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          description: UUID of the workflow thread to inspect
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Full review packet for the thread
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReviewDetailResponse'
+        '404':
+          description: Thread ID not found in the in-memory registry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "Unknown thread_id"
+
+  /review/{thread_id}/resume:
+    post:
+      operationId: resumeReview
+      tags: [Review]
+      summary: Submit human review decision and resume workflow
+      description: |
+        Resumes a paused LangGraph workflow thread by injecting the human reviewer's
+        decision. At least one field must be provided. If the resumed workflow hits
+        another interrupt (e.g. delivery failure), the thread re-enters pending state
+        and the response shape mirrors the pending_review case.
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          description: UUID of the paused workflow thread to resume
+          schema:
+            type: string
+            format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HumanReviewResume'
+            examples:
+              approve_with_response:
+                summary: Approve and supply final response text
+                value:
+                  approved: true
+                  final_response: "We have approved your full refund of $149.00. You will receive it in 3-5 business days."
+                  notes: "Customer history verified. Refund within policy."
+              escalate_with_resolution:
+                summary: Override resolution and approve
+                value:
+                  approved: true
+                  resolution:
+                    resolution_type: partial_refund
+                    refund_amount: 75.00
+                  notes: "Partial refund approved per supervisor."
+      responses:
+        '200':
+          description: Workflow completed or paused at a subsequent interrupt
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowOutcome'
+        '400':
+          description: Resume payload is empty (all fields absent or null)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "Resume payload cannot be empty"
+        '404':
+          description: Thread ID not found in the in-memory registry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "Unknown thread_id"
+        '500':
+          description: Unexpected error during workflow resumption
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Operations]
+      summary: Service health check
+      description: |
+        Liveness probe endpoint used by Azure Container Apps health checks and
+        the Dockerfile HEALTHCHECK instruction. Returns 200 when the service is
+        running.
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                service: "ComplaintForge Complaint Handler"
+
+components:
+  schemas:
+
+    ZendeskTicketRequester:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: Requester email address
+          example: "customer@example.com"
+
+    ZendeskTicketComment:
+      type: object
+      properties:
+        body:
+          type: string
+          description: Comment body text (alternative to top-level description)
+          example: "My order has not arrived after three weeks."
+
+    ZendeskTicket:
+      type: object
+      required: []
+      properties:
+        id:
+          type: integer
+          description: Zendesk ticket ID
+          example: 12345
+        subject:
+          type: string
+          description: Ticket subject line
+          example: "My order never arrived"
+        description:
+          type: string
+          description: Full complaint text (used if present; falls back to comment.body)
+          example: "I ordered item #ABC-001 three weeks ago and it has not arrived."
+        comment:
+          $ref: '#/components/schemas/ZendeskTicketComment'
+        requester:
+          $ref: '#/components/schemas/ZendeskTicketRequester'
+        via:
+          type: object
+          description: Zendesk routing metadata (alternative email extraction path)
+          additionalProperties: true
+
+    ZendeskWebhookPayload:
+      type: object
+      description: |
+        Zendesk trigger webhook payload. The `ticket` key is expected at the top
+        level. If absent, the root object is treated as the ticket directly.
+      required: []
+      properties:
+        ticket:
+          $ref: '#/components/schemas/ZendeskTicket'
+
+    WebhookAcceptedResponse:
+      type: object
+      required: [status, thread_id, message]
+      properties:
+        status:
+          type: string
+          enum: [accepted]
+          example: accepted
+        ticket_id:
+          type: integer
+          nullable: true
+          description: Zendesk ticket ID extracted from the webhook (null if not present)
+          example: 12345
+        thread_id:
+          type: string
+          format: uuid
+          description: UUID assigned to this workflow thread for later review tracking
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        message:
+          type: string
+          example: "Complaint received and being processed autonomously"
+
+    TestComplaintRequest:
+      type: object
+      required: [complaint]
+      properties:
+        complaint:
+          type: string
+          minLength: 1
+          description: Raw complaint text to process
+          example: "I received a damaged product and want a full refund."
+        email:
+          type: string
+          format: email
+          description: Customer email address (defaults to test@example.com if omitted)
+          default: "test@example.com"
+          example: "customer@example.com"
+
+    InterruptPayload:
+      type: object
+      description: Serialised LangGraph interrupt object
+      properties:
+        id:
+          type: string
+          nullable: true
+          description: Interrupt identifier assigned by LangGraph
+          example: "intr-001"
+        value:
+          description: Interrupt payload value — typically the human review context dict
+          oneOf:
+            - type: object
+              additionalProperties: true
+            - type: string
+
+    WorkflowOutcome:
+      type: object
+      required: [status, thread_id]
+      description: |
+        Returned by /test/complaint and /review/{thread_id}/resume.
+        When status is "completed", `result` is present.
+        When status is "pending_review", `interrupts` is present.
+      properties:
+        status:
+          type: string
+          enum: [completed, pending_review]
+          example: completed
+        thread_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        result:
+          type: object
+          nullable: true
+          description: Full workflow state on completion (present when status=completed)
+          additionalProperties: true
+        interrupts:
+          type: array
+          nullable: true
+          description: Active interrupt payloads (present when status=pending_review)
+          items:
+            $ref: '#/components/schemas/InterruptPayload'
+
+    ReviewSummary:
+      type: object
+      description: Per-thread summary entry in the /review list
+      properties:
+        thread_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        status:
+          type: string
+          enum: [pending_review, running, completed, error]
+          example: pending_review
+        ticket_id:
+          type: integer
+          nullable: true
+          example: 12345
+        requester_email:
+          type: string
+          format: email
+          nullable: true
+          example: "customer@example.com"
+        interrupts:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterruptPayload'
+
+    ReviewListResponse:
+      type: object
+      required: [reviews]
+      properties:
+        reviews:
+          type: array
+          description: All threads currently in pending_review status
+          items:
+            $ref: '#/components/schemas/ReviewSummary'
+
+    ReviewDetailResponse:
+      type: object
+      required: [thread_id, status, interrupts, state, next]
+      description: Full review packet for a paused workflow thread
+      properties:
+        thread_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        status:
+          type: string
+          enum: [pending_review, running, completed, error, unknown]
+          example: pending_review
+        interrupts:
+          type: array
+          items:
+            $ref: '#/components/schemas/InterruptPayload'
+        state:
+          type: object
+          description: |
+            Full LangGraph ComplaintState snapshot. Contains complaint text,
+            customer CRM history, triage result, analysis, resolution proposal,
+            specialist recommendation, guardrail eval results, and actions taken.
+          additionalProperties: true
+        next:
+          type: array
+          description: Names of graph nodes scheduled to execute on resumption
+          items:
+            type: string
+          example: ["communication_node"]
+
+    HumanReviewResume:
+      type: object
+      description: |
+        Decision payload submitted by a human reviewer to resume a paused workflow.
+        At least one field must be non-null.
+      properties:
+        final_response:
+          type: string
+          nullable: true
+          description: Override the AI-drafted customer response text (optional)
+          example: "We have approved your full refund of $149.00."
+        approved:
+          type: boolean
+          nullable: true
+          description: Whether the reviewer approves the proposed resolution
+          example: true
+        notes:
+          type: string
+          nullable: true
+          description: Internal reviewer notes (not sent to customer)
+          example: "Customer history confirmed. Refund within policy limits."
+        resolution:
+          type: object
+          nullable: true
+          description: Override or augment the AI-proposed resolution object
+          additionalProperties: true
+          example:
+            resolution_type: partial_refund
+            refund_amount: 75.00
+
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+          example: healthy
+        service:
+          type: string
+          example: "ComplaintForge Complaint Handler"
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      description: FastAPI default error response envelope
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message
+          example: "Missing description or email"

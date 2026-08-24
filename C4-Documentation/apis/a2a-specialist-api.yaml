@@ -1,0 +1,447 @@
+openapi: 3.1.0
+info:
+  title: ComplaintForge — A2A Refund Specialist API
+  description: |
+    CrewAI-powered specialist reviewer for ComplaintForge escalations.
+    Accepts escalated complaint packages from the Main Complaint Handler,
+    runs a single-agent CrewAI crew, and returns a structured advisory
+    recommendation for human reviewers. The recommendation is advisory only;
+    a human reviewer retains final approval authority.
+
+    Authentication is optional: when the `A2A_SPECIALIST_AUTH_TOKEN` environment
+    variable is set, all task endpoints require a matching Bearer token.
+  version: 0.1.0
+  contact:
+    name: ComplaintForge
+
+servers:
+  - url: https://a2a-specialist.{region}.azurecontainerapps.io
+    description: Azure Container Apps — production
+    variables:
+      region:
+        default: northeurope
+        description: Azure region
+  - url: http://localhost:8001
+    description: Docker Compose (internal port 8001)
+  - url: http://localhost:8010
+    description: Local development (port 8010)
+
+tags:
+  - name: Tasks
+    description: Specialist review task execution
+  - name: Discovery
+    description: A2A service discovery
+  - name: Operations
+    description: Service health and operations
+
+security:
+  - BearerAuth: []
+  - {}
+
+paths:
+
+  /tasks/refund-specialist:
+    post:
+      operationId: runRefundSpecialistReview
+      tags: [Tasks]
+      summary: Submit escalated complaint for specialist advisory review
+      description: |
+        Primary task endpoint. Accepts the full escalation packet assembled by
+        the Main Complaint Handler — including complaint text, AI triage/analysis/
+        resolution outputs, customer CRM history, policy gate result, guardrail
+        evaluation scores, and any prior actions taken — and returns a structured
+        advisory recommendation.
+
+        The service always returns HTTP 200 with a valid recommendation object.
+        If the CrewAI agent fails at any stage (import, setup, or execution), a
+        graceful fallback recommendation is returned with `source: fallback` and
+        `decision: human_review_required`, preserving workflow continuity.
+
+        Authentication: required when `A2A_SPECIALIST_AUTH_TOKEN` is set in the
+        service environment; bypassed when the variable is unset.
+      security:
+        - BearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpecialistRequest'
+            example:
+              complaint: "I ordered a replacement part three weeks ago and it still has not arrived. I need a refund urgently."
+              triage:
+                is_complaint: true
+                customer_email: "customer@example.com"
+                order_id: "ORD-98765"
+              customer_email: "customer@example.com"
+              order_id: "ORD-98765"
+              customer_history:
+                contact_id: "0031000000ABC"
+                account_id: "0011000000DEF"
+                recent_cases: []
+                recent_orders:
+                  - id: "8011000000GHI"
+                    order_number: "ORD-98765"
+                    status: "Shipped"
+                    total_amount: 149.99
+              analysis:
+                issue_type: "shipping"
+                sentiment: "very_negative"
+                urgency: "high"
+                is_repeat_complaint: false
+              resolution:
+                resolution_type: "full_refund"
+                refund_amount: 149.99
+                confidence_score: 0.72
+              policy_result:
+                passed: false
+                override_reason: "confidence_below_threshold"
+                escalate: true
+              eval_results:
+                empathy_score: 8
+                resolution_appropriateness: 7
+              actions_taken: []
+      responses:
+        '200':
+          description: |
+            Advisory recommendation from the CrewAI specialist agent, or a
+            fallback recommendation if CrewAI was unavailable.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpecialistResponse'
+              examples:
+                crewai_success:
+                  summary: CrewAI agent produced a recommendation
+                  value:
+                    status: success
+                    source: crewai
+                    recommendation:
+                      decision: approve_full_refund
+                      risk_level: low
+                      approved: false
+                      refund_amount: 149.99
+                      credit_amount: 0
+                      reasoning: "Customer has a clean history, single order, confirmed shipment delay. Full refund is within policy."
+                      human_reviewer_notes:
+                        - "Verify Salesforce order status before approving."
+                        - "Customer is high-value — consider expedited processing."
+                      draft_response: "We sincerely apologise for the delay. We have initiated a full refund of $149.99 which will appear within 3-5 business days."
+                fallback_crewai_unavailable:
+                  summary: CrewAI unavailable — fallback recommendation returned
+                  value:
+                    status: success
+                    source: fallback
+                    recommendation:
+                      decision: human_review_required
+                      risk_level: unknown
+                      approved: false
+                      refund_amount: 0
+                      credit_amount: 0
+                      reasoning: "CrewAI execution failed: connection timeout."
+                      human_reviewer_notes:
+                        - "CrewAI could not run, so review the escalation manually."
+                        - "Check Salesforce order, cases, returns, and policy before approving action."
+                      draft_response: "Thank you for your patience. Your case is being reviewed by our support team, and we will follow up shortly."
+        '401':
+          description: Bearer token present but invalid (only raised when A2A_SPECIALIST_AUTH_TOKEN is configured)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetail'
+              example:
+                detail: "Invalid specialist service token"
+
+  /.well-known/agent-card.json:
+    get:
+      operationId: getAgentCard
+      tags: [Discovery]
+      summary: A2A agent discovery card
+      description: |
+        Returns a machine-readable agent card compliant with the A2A service
+        discovery convention. Advertises the service name, version, capabilities,
+        and the task endpoint URL. No authentication required.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Agent card JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentCard'
+              example:
+                name: refund-specialist
+                description: "Reviews escalated refund, credit, and replacement cases for human approval."
+                version: "0.1.0"
+                url: /tasks/refund-specialist
+                capabilities:
+                  - refund_review
+                  - credit_review
+                  - replacement_review
+                  - human_reviewer_packet
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [Operations]
+      summary: Service health check
+      description: |
+        Liveness probe used by Azure Container Apps health checks and the
+        Dockerfile HEALTHCHECK instruction (`curl -f http://localhost:8001/health`).
+        No authentication required.
+      security:
+        - {}
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              example:
+                status: healthy
+                service: refund-specialist-a2a
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Shared-secret Bearer token. Required only when `A2A_SPECIALIST_AUTH_TOKEN`
+        is set in the service environment. When the variable is unset, the
+        endpoint is unauthenticated.
+
+  schemas:
+
+    SpecialistRequest:
+      type: object
+      required: [complaint]
+      description: |
+        Full escalation packet assembled by the Main Complaint Handler.
+        All fields except `complaint` default to empty dicts/lists if omitted.
+      properties:
+        complaint:
+          type: string
+          minLength: 1
+          description: Raw complaint text from the Zendesk ticket
+          example: "I ordered a replacement part three weeks ago and it still has not arrived."
+        triage:
+          type: object
+          description: Output of the LangGraph triage agent node
+          additionalProperties: true
+          default: {}
+          example:
+            is_complaint: true
+            customer_email: "customer@example.com"
+            order_id: "ORD-98765"
+        customer_email:
+          type: string
+          format: email
+          nullable: true
+          description: Customer email extracted during triage
+          example: "customer@example.com"
+        order_id:
+          type: string
+          nullable: true
+          description: Order identifier extracted during triage
+          example: "ORD-98765"
+        customer_history:
+          type: object
+          description: Salesforce customer context fetched during the enrichment node
+          additionalProperties: true
+          default: {}
+          example:
+            contact_id: "0031000000ABC"
+            account_id: "0011000000DEF"
+            recent_cases: []
+            recent_orders:
+              - id: "8011000000GHI"
+                order_number: "ORD-98765"
+                status: "Shipped"
+                total_amount: 149.99
+        analysis:
+          type: object
+          description: Output of the LangGraph analyzer agent node
+          additionalProperties: true
+          default: {}
+          example:
+            issue_type: shipping
+            sentiment: very_negative
+            urgency: high
+            is_repeat_complaint: false
+        resolution:
+          type: object
+          description: Output of the LangGraph resolver agent node
+          additionalProperties: true
+          default: {}
+          example:
+            resolution_type: full_refund
+            refund_amount: 149.99
+            confidence_score: 0.72
+        policy_result:
+          type: object
+          description: Output of the deterministic policy gate node
+          additionalProperties: true
+          default: {}
+          example:
+            passed: false
+            override_reason: confidence_below_threshold
+            escalate: true
+        eval_results:
+          type: object
+          description: Output of the guardrails LLM quality evaluation node
+          additionalProperties: true
+          default: {}
+          example:
+            empathy_score: 8
+            resolution_appropriateness: 7
+        actions_taken:
+          type: array
+          description: CRM actions already executed in the current workflow run
+          items:
+            type: object
+            additionalProperties: true
+          default: []
+
+    Recommendation:
+      type: object
+      required:
+        - decision
+        - risk_level
+        - approved
+        - refund_amount
+        - credit_amount
+        - reasoning
+        - human_reviewer_notes
+        - draft_response
+      description: |
+        Structured advisory recommendation produced by the CrewAI specialist agent
+        or the fallback path. All fields are always present.
+      properties:
+        decision:
+          type: string
+          description: |
+            Recommended action string. Common values from the CrewAI agent:
+            approve_full_refund, approve_partial_refund, approve_credit,
+            approve_replacement, deny, escalate_to_manager, human_review_required.
+          example: approve_full_refund
+        risk_level:
+          type: string
+          description: Assessed risk level of the recommended action
+          enum: [low, medium, high, unknown]
+          example: low
+        approved:
+          type: boolean
+          description: |
+            Whether the agent recommends autonomous approval. Always false from
+            the specialist agent — this service is advisory only.
+          example: false
+        refund_amount:
+          type: number
+          format: float
+          description: Recommended refund amount in the order currency (0 if not applicable)
+          minimum: 0
+          example: 149.99
+        credit_amount:
+          type: number
+          format: float
+          description: Recommended store credit amount (0 if not applicable)
+          minimum: 0
+          example: 0
+        reasoning:
+          type: string
+          description: Evidence-based reasoning supporting the recommendation
+          example: "Customer has a clean history, single order, confirmed shipment delay. Full refund is within policy."
+        human_reviewer_notes:
+          type: array
+          description: Specific guidance points for the human reviewer
+          items:
+            type: string
+          example:
+            - "Verify Salesforce order status before approving."
+            - "Customer is high-value — consider expedited processing."
+        draft_response:
+          type: string
+          description: Draft customer-facing response text for the reviewer to use or modify
+          example: "We sincerely apologise for the delay. We have initiated a full refund of $149.99 which will appear within 3-5 business days."
+
+    SpecialistResponse:
+      type: object
+      required: [status, source, recommendation]
+      description: Response envelope for the specialist review task endpoint
+      properties:
+        status:
+          type: string
+          enum: [success, error]
+          description: |
+            Always "success" for valid requests. Even when CrewAI fails and a
+            fallback is returned, the HTTP status is 200 and this field is "success".
+          example: success
+        source:
+          type: string
+          enum: [crewai, fallback]
+          description: |
+            "crewai" when the CrewAI agent ran successfully;
+            "fallback" when CrewAI was unavailable and the hardcoded fallback was used.
+          example: crewai
+        recommendation:
+          $ref: '#/components/schemas/Recommendation'
+
+    AgentCard:
+      type: object
+      required: [name, description, version, url, capabilities]
+      description: A2A service discovery card
+      properties:
+        name:
+          type: string
+          example: refund-specialist
+        description:
+          type: string
+          example: "Reviews escalated refund, credit, and replacement cases for human approval."
+        version:
+          type: string
+          example: "0.1.0"
+        url:
+          type: string
+          description: Relative path to the task endpoint
+          example: /tasks/refund-specialist
+        capabilities:
+          type: array
+          items:
+            type: string
+            enum:
+              - refund_review
+              - credit_review
+              - replacement_review
+              - human_reviewer_packet
+          example:
+            - refund_review
+            - credit_review
+            - replacement_review
+            - human_reviewer_packet
+
+    HealthResponse:
+      type: object
+      required: [status, service]
+      properties:
+        status:
+          type: string
+          enum: [healthy]
+          example: healthy
+        service:
+          type: string
+          example: refund-specialist-a2a
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      description: FastAPI default error response envelope
+      properties:
+        detail:
+          type: string
+          description: Human-readable error message
+          example: "Invalid specialist service token"
