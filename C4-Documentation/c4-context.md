@@ -18,6 +18,18 @@ Both services are deployed as Docker containers (Azure Container Apps in northeu
 
 ## Personas
 
+### Customer
+
+- **Type**: Human User
+- **Description**: The end customer who raised the original complaint. They interact with the business through Zendesk (submitting the ticket) and receive the resolution response via email or SMS delivered by Mailchimp Transactional. They are never aware of ComplaintForge directly — from their perspective, they submitted a support ticket and received a reply.
+- **Goals**:
+  - Get their complaint resolved quickly and fairly
+  - Receive clear communication about the outcome (refund, credit, replacement, or explanation)
+- **Key Features Used**:
+  - Autonomous Complaint Triage (their ticket triggers the workflow)
+  - AI-Driven Resolution Proposal (determines what they receive)
+  - Outbound Communication (email/SMS delivery of the final response)
+
 ### Support Agent / Human Reviewer
 
 - **Type**: Human User
@@ -31,42 +43,6 @@ Both services are deployed as Docker containers (Azure Container Apps in northeu
   - Salesforce Customer Enrichment (surfaced in the review packet)
   - Response Quality Guardrails (guardrail failure is one of the escalation triggers)
 
-### Support Operations Engineer
-
-- **Type**: Human User
-- **Description**: An engineer or DevOps team member responsible for keeping both services healthy and observable. They do not interact with complaint workflows directly but monitor system behaviour, manage configuration, maintain deployments, and investigate failures using observability tooling.
-- **Goals**:
-  - Maintain service availability and correctness for both containers
-  - Monitor workflow execution via LangSmith traces and OpenTelemetry dashboards
-  - Configure environment variables (LLM endpoints, Salesforce credentials, Zendesk tokens)
-  - Investigate failures and restart services when necessary
-- **Key Features Used**:
-  - Full Observability (OpenTelemetry traces, metrics, logs; LangSmith LLM tracing)
-  - Health check endpoints (`/health` on both services)
-
-### Zendesk
-
-- **Type**: Programmatic User / External System
-- **Description**: The customer helpdesk platform that is the primary source of complaint tickets. Zendesk sends inbound webhooks to ComplaintForge when tickets are created or updated, and receives outbound ticket updates (status changes, public comments) from ComplaintForge at the end of the workflow via the MCP streamable HTTP interface.
-- **Goals**:
-  - Deliver complaint ticket events to ComplaintForge for autonomous processing
-  - Receive ticket closure or status updates when processing is complete
-- **Key Features Used**:
-  - Autonomous Complaint Triage (entry point)
-  - Zendesk Ticket Completion (outbound MCP update)
-
-### Integration Test Client / Developer
-
-- **Type**: Programmatic User / Human User
-- **Description**: A developer or QA engineer who exercises the complaint workflow without needing a live Zendesk webhook. They post synthetic complaint payloads directly to the test endpoint and inspect the resulting workflow state, making it possible to validate end-to-end behaviour in development or staging environments.
-- **Goals**:
-  - Verify workflow correctness for specific complaint scenarios
-  - Test escalation paths and human review flows in isolation
-  - Develop and debug new workflow steps without Zendesk involvement
-- **Key Features Used**:
-  - Autonomous Complaint Triage (via `/test/complaint`)
-  - All downstream workflow features (Customer Enrichment, Resolution, Policy Gate, Guardrails, Escalation)
-
 ---
 
 ## System Features
@@ -74,160 +50,128 @@ Both services are deployed as Docker containers (Azure Container Apps in northeu
 ### 1. Autonomous Complaint Triage
 
 - **Description**: The LLM-based triage agent classifies each inbound ticket as a complaint or a non-complaint. Non-complaints exit the workflow immediately. Complaints proceed to enrichment and resolution. This gate prevents the system from processing irrelevant tickets.
-- **Users**: Zendesk (inbound webhook), Integration Test Client / Developer
-- **User Journey**: [Autonomous Triage Journey](#1-autonomous-complaint-triage---zendesk-journey)
+- **Users**: Customer (originator via Zendesk)
+- **User Journey**: [Autonomous Triage Journey](#1-autonomous-complaint-triage-journey)
 
 ### 2. Salesforce Customer Enrichment
 
 - **Description**: Before resolution is attempted, the workflow fetches the full customer context from Salesforce: contact record, linked account, open and historical cases, recent orders, and return orders. This data is available to all downstream agents and is included in the human review packet for escalated cases.
-- **Users**: Zendesk (indirectly, as ticket originator), Support Agent / Human Reviewer (receives this data in escalation packet)
-- **User Journey**: [Salesforce Enrichment Journey](#2-salesforce-customer-enrichment---automated-workflow-journey)
+- **Users**: Customer (their data), Support Agent / Human Reviewer (receives this data in escalation packet)
+- **User Journey**: [Salesforce Enrichment Journey](#2-salesforce-customer-enrichment-journey)
 
 ### 3. AI-Driven Resolution Proposal
 
 - **Description**: The resolver LLM agent analyses the enriched complaint and proposes a resolution action: full refund, partial credit, product replacement, or escalation to a human. The proposal is passed to the deterministic policy gate before any action is taken.
-- **Users**: Zendesk (indirectly), Integration Test Client / Developer
-- **User Journey**: [Resolution Proposal Journey](#3-ai-driven-resolution-proposal---automated-workflow-journey)
+- **Users**: Customer (outcome affects them directly)
+- **User Journey**: [Resolution Proposal Journey](#3-ai-driven-resolution-proposal-journey)
 
 ### 4. Deterministic Policy Gate
 
 - **Description**: A non-LLM node applies hard-coded business rules to the proposed resolution. If the proposal breaches policy thresholds (e.g., refund amount above limit), the workflow routes to the escalation path rather than proceeding automatically. This is the first trigger for human review.
-- **Users**: Zendesk (indirectly), Support Agent / Human Reviewer (receives policy-flagged cases)
-- **User Journey**: [Policy Escalation Journey](#policy-escalation---support-agent--human-reviewer-journey)
+- **Users**: Customer (outcome affects them), Support Agent / Human Reviewer (receives policy-flagged cases)
+- **User Journey**: [Policy Escalation Journey](#policy-escalation-journey)
 
 ### 5. Response Quality Guardrails
 
 - **Description**: An LLM evaluator reviews the drafted customer-facing response for quality and appropriateness before it is sent. If the response fails the quality check, the workflow routes to the escalation path. This is the second trigger for human review.
-- **Users**: Zendesk (indirectly), Support Agent / Human Reviewer (receives guardrail-flagged cases)
-- **User Journey**: [Guardrails Escalation Journey](#guardrails-escalation---support-agent--human-reviewer-journey)
+- **Users**: Customer (receives the response), Support Agent / Human Reviewer (receives guardrail-flagged cases)
+- **User Journey**: [Guardrails Escalation Journey](#guardrails-escalation-journey)
 
 ### 6. Salesforce Action Automation
 
 - **Description**: Once the resolution is approved (either automatically or by a human reviewer), the action agent creates the corresponding record in Salesforce — a Case for complaint tracking or a Task for follow-up actions.
-- **Users**: Zendesk (indirectly, as originating system), Support Agent / Human Reviewer (their decision triggers this)
-- **User Journey**: [Action Automation Journey](#6-salesforce-action-automation---automated-workflow-journey)
+- **Users**: Customer (resolution executed on their behalf), Support Agent / Human Reviewer (their decision triggers this on escalated cases)
+- **User Journey**: [Action Automation Journey](#6-salesforce-action-automation-journey)
 
-### 7. Zendesk Ticket Completion
+### 7. Outbound Customer Communication
 
-- **Description**: The final step of every successful workflow run updates the originating Zendesk ticket via MCP streamable HTTP: the ticket receives a public comment with the resolution or response text and its status is updated to reflect the outcome.
-- **Users**: Zendesk (receives the update), Support Agent / Human Reviewer (their approval leads here)
-- **User Journey**: [Ticket Completion Journey](#7-zendesk-ticket-completion---automated-workflow-journey)
+- **Description**: The final step of every successful workflow run delivers the resolution response to the customer via Mailchimp Transactional email, with SMS as an automatic fallback on permanent email failure. The originating Zendesk ticket is also updated via MCP streamable HTTP with the outcome and status change.
+- **Users**: Customer (receives the email or SMS), Support Agent / Human Reviewer (their approval leads here on escalated cases)
+- **User Journey**: [Outbound Communication Journey](#7-outbound-customer-communication-journey)
 
 ### 8. Human-in-the-Loop Escalation
 
 - **Description**: When policy or guardrails flag a case, the LangGraph workflow pauses at an interrupt node and remains suspended until a human decision arrives. Before the interrupt fires, the A2A Refund Specialist Service is called to produce a CrewAI advisory recommendation. The human reviewer sees the full packet (complaint, customer history, specialist recommendation) via the `/review` API and submits an approve/reject decision with a final response text to resume the workflow.
-- **Users**: Support Agent / Human Reviewer, A2A Refund Specialist Service (programmatic)
-- **User Journey**: [Human-in-the-Loop Escalation Journey](#8-human-in-the-loop-escalation---support-agent--human-reviewer-journey)
-
-### 9. Full Observability
-
-- **Description**: Both services emit OpenTelemetry traces, metrics, and structured logs through an OTLP exporter to an OpenTelemetry Collector (forwarded to New Relic). LangSmith captures LLM-level workflow traces for debugging agent behaviour and evaluating response quality.
-- **Users**: Support Operations Engineer
-- **User Journey**: [Observability Monitoring Journey](#9-full-observability---support-operations-engineer-journey)
+- **Users**: Support Agent / Human Reviewer, Customer (receives the outcome)
+- **User Journey**: [Human-in-the-Loop Escalation Journey](#8-human-in-the-loop-escalation-journey)
 
 ---
 
 ## User Journeys
 
-### 1. Autonomous Complaint Triage - Zendesk Journey
+### 1. Autonomous Complaint Triage Journey
 
-1. **Ticket created**: A customer submits a support ticket in Zendesk (e.g., "My order never arrived").
+1. **Customer submits ticket**: A customer contacts support in Zendesk (e.g., "My order never arrived").
 2. **Webhook fires**: Zendesk sends a `POST /webhook/zendesk/complaint` request to ComplaintForge with the ticket payload.
-3. **Background processing starts**: The main service accepts the webhook and begins processing the workflow asynchronously.
-4. **Triage agent runs**: An LLM agent reads the ticket subject and body and classifies it as a complaint or a non-complaint.
-5. **Non-complaint path**: If classified as a non-complaint, the workflow routes to the ignored node and terminates. No further action is taken.
-6. **Complaint path**: If classified as a complaint, the workflow continues to customer enrichment.
+3. **Triage agent runs**: An LLM agent reads the ticket and classifies it as a complaint or a non-complaint.
+4. **Non-complaint path**: If not a complaint, the workflow routes to the ignored node and terminates. No action is taken.
+5. **Complaint path**: If a complaint, the workflow continues to customer enrichment.
 
-### 2. Salesforce Customer Enrichment - Automated Workflow Journey
+### 2. Salesforce Customer Enrichment Journey
 
 1. **Complaint confirmed**: Triage has classified the ticket as a complaint.
-2. **Contact lookup**: The customer context node calls the Salesforce REST API (OAuth 2.0) to look up the contact record matching the ticket's requester email.
-3. **Account and history fetch**: Additional API calls retrieve the linked account, open cases, order history, and return orders.
-4. **Context assembled**: All Salesforce data is assembled into a structured context object and attached to the LangGraph workflow state.
-5. **Workflow continues**: The enriched state is passed to the analyzer agent for complaint extraction.
+2. **Contact lookup**: The customer context node calls the Salesforce REST API (OAuth 2.0) to find the contact record matching the customer's email.
+3. **History fetch**: Additional queries retrieve the linked account, open and historical cases, order history, and return orders.
+4. **Context assembled**: All Salesforce data is attached to the LangGraph workflow state and flows into every downstream agent.
+5. **Workflow continues**: The enriched state is passed to the analyzer agent.
 
-### 3. AI-Driven Resolution Proposal - Automated Workflow Journey
+### 3. AI-Driven Resolution Proposal Journey
 
-1. **Analyzer agent runs**: An LLM agent reads the ticket text and Salesforce context and extracts structured complaint details (product, issue type, severity, customer sentiment).
-2. **Resolver agent runs**: An LLM agent receives the extracted complaint details and proposes a resolution: full refund, partial credit, product replacement, or escalation.
-3. **Proposal recorded**: The proposed resolution and rationale are stored in the workflow state.
+1. **Analyzer agent runs**: An LLM agent extracts structured complaint details — issue type, severity, sentiment, repeat-customer flag.
+2. **Resolver agent runs**: An LLM agent proposes a resolution: full refund, partial credit, product replacement, or escalation.
+3. **Proposal recorded**: The resolution and rationale are stored in the workflow state.
 4. **Policy gate runs**: The deterministic policy node evaluates the proposal against business rules.
 
-### Policy Escalation - Support Agent / Human Reviewer Journey
+### Policy Escalation Journey
 
-1. **Policy gate triggers**: The proposal breaches a business rule (e.g., refund exceeds threshold, customer tier requires manual approval).
-2. **Specialist advisory requested**: The workflow calls the A2A Refund Specialist Service (`POST /tasks/refund-specialist`) with the escalation packet.
-3. **CrewAI recommendation received**: The specialist service returns an advisory recommendation (or a fallback if unavailable).
-4. **Human review interrupt fires**: LangGraph suspends the workflow thread. The thread ID and full packet (complaint, Salesforce context, specialist recommendation) are stored in the checkpoint state.
+1. **Policy gate triggers**: The proposal breaches a business rule (e.g., refund exceeds $500, no matched Salesforce order).
+2. **Specialist advisory requested**: The workflow calls the A2A Refund Specialist Service (`POST /tasks/refund-specialist`) with the full escalation packet.
+3. **CrewAI recommendation received**: The specialist service returns an advisory recommendation (or a safe fallback if unavailable).
+4. **Human review interrupt fires**: LangGraph suspends the workflow thread. The full packet (complaint, Salesforce context, specialist recommendation) is persisted in the checkpoint store.
 5. **Reviewer lists pending cases**: A support agent calls `GET /review` to see all suspended threads.
 6. **Reviewer inspects case**: The agent calls `GET /review/{thread_id}` to read the full review packet.
-7. **Reviewer decides**: The agent calls `POST /review/{thread_id}/resume` with an `approve` or `reject` decision and a final response text.
+7. **Reviewer decides**: The agent calls `POST /review/{thread_id}/resume` with an approve/reject decision and final response text.
 8. **Workflow resumes**: LangGraph unpauses the thread and routes to the communication node.
-9. **Ticket completed**: The Zendesk ticket is updated via MCP with the final outcome.
+9. **Customer notified**: The resolution response is delivered to the customer via Mailchimp and the Zendesk ticket is updated via MCP.
 
-### Guardrails Escalation - Support Agent / Human Reviewer Journey
+### Guardrails Escalation Journey
 
-1. **Responder agent runs**: An LLM agent drafts the customer-facing response text based on the resolved complaint and Salesforce context.
-2. **Guardrails node runs**: An LLM evaluator scores the draft for quality and appropriateness.
-3. **Guardrails escalate**: The evaluator flags the response as inappropriate or insufficient.
+1. **Responder agent runs**: An LLM agent drafts the customer-facing response based on the resolved complaint and Salesforce context.
+2. **Guardrails node runs**: LLM evaluators score the draft for empathy and resolution appropriateness.
+3. **Guardrails escalate**: One or both scores fall below the threshold (< 6/10).
 4. **Specialist advisory requested**: The workflow calls the A2A Refund Specialist Service for an advisory recommendation.
-5. **Human review interrupt fires**: LangGraph suspends the workflow thread with the draft response and guardrail failure reason included in the packet.
-6. **Reviewer lists pending cases**: A support agent calls `GET /review` and identifies the guardrail-flagged thread.
-7. **Reviewer inspects case**: The agent calls `GET /review/{thread_id}` to read the draft response, failure reason, and specialist recommendation.
-8. **Reviewer decides**: The agent calls `POST /review/{thread_id}/resume` with a corrected or approved response text.
-9. **Workflow resumes**: LangGraph routes to the action agent, then the communication node.
-10. **Ticket completed**: The Zendesk ticket is updated via MCP.
+5. **Human review interrupt fires**: LangGraph suspends the thread with the draft response and guardrail failure reason in the packet.
+6. **Reviewer inspects and decides**: The support agent reviews the draft, failure reason, and specialist recommendation via `GET /review/{thread_id}`, then resumes via `POST /review/{thread_id}/resume` with a corrected response.
+7. **Customer notified**: The approved response is delivered to the customer via Mailchimp and the Zendesk ticket is updated via MCP.
 
-### 6. Salesforce Action Automation - Automated Workflow Journey
+### 6. Salesforce Action Automation Journey
 
-1. **Resolution approved**: Either the guardrails node passed automatically or a human reviewer submitted an approval.
-2. **Action agent runs**: An LLM agent determines the appropriate Salesforce record type based on the resolution (Case for complaint tracking, Task for follow-up).
-3. **Salesforce API called**: The action agent creates the record via the Salesforce REST API.
-4. **Record ID stored**: The created record ID is stored in the workflow state for audit purposes.
-5. **Workflow continues**: The communication node runs next to finalise the Zendesk ticket.
+1. **Resolution approved**: Either guardrails passed automatically or a human reviewer submitted an approval.
+2. **Action agent runs**: Determines the appropriate Salesforce record type based on the resolution (Case for refund/credit, Task for replacement).
+3. **Salesforce API called**: The record is created via the Salesforce REST API and the ID stored in workflow state.
+4. **Workflow continues**: The communication node runs next.
 
-### 7. Zendesk Ticket Completion - Automated Workflow Journey
+### 7. Outbound Customer Communication Journey
 
-1. **Salesforce action complete**: The workflow state contains an approved resolution and a Salesforce record ID.
-2. **Communication node runs**: The node prepares the final customer response text and the target ticket status.
-3. **MCP call made**: The communication node calls the Zendesk MCP streamable HTTP interface with the ticket ID, response comment, and new status.
-4. **Zendesk ticket updated**: The Zendesk ticket receives a public comment and its status changes to reflect the resolution (e.g., solved, pending).
-5. **Workflow ends**: The LangGraph workflow thread completes successfully.
+1. **Action complete**: The workflow holds an approved resolution and Salesforce record.
+2. **Communication node runs**: Prepares the final customer response text and delivery targets.
+3. **Email sent**: Mailchimp Transactional sends the response email to the customer's address.
+4. **SMS fallback**: If email delivery fails permanently (bounced address, rejected), Mailchimp SMS is used automatically.
+5. **Zendesk ticket updated**: The MCP streamable HTTP call updates the originating ticket with a public comment and sets status to `solved`.
+6. **Workflow ends**: The LangGraph thread completes successfully. The customer has their answer.
 
-### 8. Human-in-the-Loop Escalation - Support Agent / Human Reviewer Journey
+### 8. Human-in-the-Loop Escalation Journey
 
-This is the consolidated end-to-end escalation journey covering both policy and guardrail triggers.
+End-to-end escalation covering both policy and guardrail triggers.
 
-1. **Escalation triggered**: Either the policy gate or the guardrails node determines the case cannot be resolved automatically.
-2. **Specialist advisory**: ComplaintForge calls `POST /tasks/refund-specialist` on the A2A Refund Specialist Service. CrewAI agents analyse the case and return an advisory recommendation.
-3. **Interrupt fires**: LangGraph suspends the thread. The full review packet (ticket, Salesforce context, draft response if applicable, specialist recommendation, escalation reason) is persisted in the checkpoint store.
-4. **Reviewer discovers case**: The support agent calls `GET /review` and sees the thread in the pending list with its escalation reason.
-5. **Reviewer reads packet**: The agent calls `GET /review/{thread_id}` to read the full packet.
-6. **Reviewer submits decision**: The agent calls `POST /review/{thread_id}/resume` with:
-   - `decision`: `approve` or `reject`
-   - `response_text`: the final customer-facing message
-7. **Workflow resumes**: LangGraph routes to the action agent (Salesforce) then the communication node (Zendesk MCP).
-8. **Ticket finalised**: The Zendesk ticket is updated. The workflow thread closes.
-
-### Developer Test Flow - Integration Test Client / Developer Journey
-
-1. **Developer prepares payload**: The developer constructs a synthetic complaint payload matching the expected schema (customer email, ticket subject, ticket body).
-2. **Test request sent**: The developer calls `POST /test/complaint` with the payload. No Zendesk webhook is required.
-3. **Workflow executes**: ComplaintForge runs the full workflow (triage, enrichment, resolution, policy, guardrails, action, communication) against the test payload.
-4. **Escalation scenario**: If testing escalation, the developer calls `GET /review` to find the paused thread.
-5. **Review packet inspected**: The developer calls `GET /review/{thread_id}` to inspect the escalation packet including the specialist recommendation.
-6. **Decision submitted**: The developer calls `POST /review/{thread_id}/resume` to resume the paused workflow.
-7. **Outcome verified**: The developer confirms the Salesforce records and Zendesk ticket were updated correctly (or inspects traces in LangSmith/OTLP dashboards).
-
-### 9. Full Observability - Support Operations Engineer Journey
-
-1. **Service starts**: Both containers initialise the OpenTelemetry SDK on startup, configuring OTLP HTTP exporters pointing at the collector endpoint.
-2. **Traces emitted**: Every workflow execution emits distributed traces — span-per-node for the LangGraph graph and span-per-LLM-call for each agent.
-3. **LangSmith captures LLM traces**: LangChain's built-in LangSmith integration records each LLM invocation (prompt, completion, latency, token counts) for debugging and evaluation.
-4. **Metrics and logs shipped**: The OTLP exporter sends metrics and structured logs alongside traces to the collector, which forwards to New Relic.
-5. **Engineer monitors dashboards**: The operations engineer reviews New Relic dashboards for error rates, workflow latency, and escalation frequency.
-6. **Engineer investigates failures**: On alert, the engineer inspects the LangSmith trace for the failing thread ID to identify which agent produced an unexpected result.
-7. **Health checked**: The engineer calls `GET /health` on both services to confirm liveness before and after deployments.
+1. **Escalation triggered**: Policy gate or guardrails node determines the case cannot be resolved automatically.
+2. **Specialist advisory**: ComplaintForge calls the A2A Refund Specialist Service. The CrewAI agent analyses the full case and returns an advisory recommendation.
+3. **Interrupt fires**: LangGraph suspends the thread. The review packet (complaint, Salesforce context, draft response if applicable, specialist recommendation, escalation reason) is persisted.
+4. **Reviewer discovers case**: The support agent calls `GET /review` and finds the thread in the pending list.
+5. **Reviewer reads packet**: Calls `GET /review/{thread_id}` for the full context including the specialist recommendation.
+6. **Reviewer submits decision**: Calls `POST /review/{thread_id}/resume` with `decision` (approve/reject) and `response_text` (final customer-facing message).
+7. **Workflow resumes**: Routes to the action agent (Salesforce), then the communication node (Mailchimp + Zendesk MCP).
+8. **Customer notified**: The human-approved response reaches the customer. The ticket closes.
 
 ---
 
@@ -257,16 +201,16 @@ This is the consolidated end-to-end escalation journey covering both policy and 
 ### LangSmith
 
 - **Type**: LLM Observability SaaS
-- **Description**: Anthropic-independent LLM observability platform provided by LangChain. Captures detailed execution traces at the LLM call level, including prompts, completions, latency, and token usage, enabling debugging and quality evaluation of agent behaviour.
+- **Description**: LLM observability platform provided by LangChain. Captures detailed execution traces at the LLM call level — prompts, completions, latency, and token usage — enabling debugging and quality evaluation of agent behaviour.
 - **Integration Type**: HTTP tracing via LangChain's built-in LangSmith callback integration (no explicit SDK calls required in application code).
 - **Purpose**: Workflow execution trace capture and LLM-level debugging; evaluation of agent response quality over time.
 
 ### OpenTelemetry Collector / New Relic
 
 - **Type**: Observability Infrastructure (self-managed collector + SaaS backend)
-- **Description**: Both ComplaintForge services emit OpenTelemetry signals (distributed traces, metrics, structured logs) via an OTLP HTTP exporter to an OpenTelemetry Collector. The collector forwards signals to New Relic for storage, dashboarding, and alerting. This gives the operations team end-to-end visibility across both Docker containers.
+- **Description**: Both ComplaintForge services emit OpenTelemetry signals (distributed traces, metrics, structured logs) via OTLP HTTP to an OpenTelemetry Collector, which forwards to New Relic for dashboarding and alerting.
 - **Integration Type**: OTLP HTTP export from application to collector; collector-to-New Relic via New Relic's OTLP ingest endpoint.
-- **Purpose**: Distributed tracing, metrics collection, and structured log aggregation for both services; operational monitoring, alerting, and performance analysis.
+- **Purpose**: Distributed tracing, metrics collection, and structured log aggregation for both services.
 
 ### A2A Refund Specialist Service (Internal Second Service)
 
@@ -281,30 +225,50 @@ This is the consolidated end-to-end escalation journey covering both policy and 
 
 ```mermaid
 C4Context
-    title System Context Diagram — ComplaintForge
+    title ComplaintForge — System Context
 
-    Person(reviewer, "Support Agent / Human Reviewer", "Reviews escalated complaint cases and submits approval or rejection decisions via the review API")
-    Person(ops, "Support Operations Engineer", "Monitors system health, manages configuration and deployments, reviews observability dashboards")
-    Person(developer, "Integration Test Client / Developer", "Posts synthetic complaints to the test endpoint to validate workflow behaviour")
+    UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")
 
-    System(complaintforge, "ComplaintForge", "Autonomous complaint handling workflow. Triages tickets, enriches with CRM data, proposes and validates resolutions, escalates to humans when required, and completes tickets in Zendesk")
+    Person(customer, "Customer", "Submits complaints<br/>and receives responses")
+    Person(reviewer, "Support Agent", "Reviews escalated cases")
 
-    System_Ext(zendesk, "Zendesk", "Customer helpdesk platform. Sends inbound complaint ticket webhooks and receives outbound ticket status updates and response comments")
-    System_Ext(salesforce, "Salesforce", "CRM system. Provides customer contact, account, case, order, and return order data. Receives created Cases and Tasks for resolved complaints")
-    System_Ext(azureopenai, "Azure OpenAI", "LLM API. Powers all AI agents — triage, analysis, resolution, response drafting, quality evaluation, and specialist advisory")
-    System_Ext(langsmith, "LangSmith", "LLM observability platform. Captures LLM-level workflow traces, prompts, completions, and token usage for debugging and evaluation")
-    System_Ext(otelcollector, "OpenTelemetry Collector / New Relic", "Observability backend. Receives distributed traces, metrics, and structured logs from both services via OTLP HTTP export")
+    System_Ext(zendesk, "Zendesk", "Complaint tickets")
+    System_Ext(salesforce, "Salesforce", "CRM and order data")
+    System_Ext(mailchimp, "Mailchimp", "Email and SMS delivery")
 
-    Rel(zendesk, complaintforge, "Sends complaint ticket webhooks", "HTTP POST /webhook/zendesk/complaint")
-    Rel(complaintforge, zendesk, "Updates ticket status and posts response comment", "MCP streamable HTTP")
-    Rel(complaintforge, salesforce, "Fetches customer context; creates Cases and Tasks", "REST API / OAuth 2.0")
-    Rel(complaintforge, azureopenai, "Invokes LLM agents for triage, analysis, resolution, guardrails, and advisory", "Azure OpenAI REST API")
-    Rel(complaintforge, langsmith, "Emits LLM execution traces", "HTTP tracing (LangChain built-in)")
-    Rel(complaintforge, otelcollector, "Exports distributed traces, metrics, and logs", "OTLP HTTP")
+    System(complaintforge, "ComplaintForge", "Automated complaint handling")
 
-    Rel(reviewer, complaintforge, "Lists, inspects, and resumes escalated complaint threads", "REST API (GET /review, POST /review/{id}/resume)")
-    Rel(developer, complaintforge, "Submits synthetic complaint payloads for testing", "REST API (POST /test/complaint)")
-    Rel(ops, complaintforge, "Monitors health, reviews traces, manages configuration", "GET /health; LangSmith; New Relic dashboards")
+    System_Ext(azureopenai, "Azure OpenAI", "LLM agents")
+    System_Ext(langsmith, "LangSmith", "LLM observability")
+    System_Ext(otelcollector, "OpenTelemetry / New Relic", "System observability")
+
+    Rel(customer, zendesk, "Submits complaint")
+    Rel(zendesk, complaintforge, "Sends webhook")
+    Rel(complaintforge, zendesk, "Updates ticket")
+
+    Rel(complaintforge, salesforce, "Reads and writes CRM data")
+    Rel(complaintforge, mailchimp, "Sends response")
+    Rel(mailchimp, customer, "Delivers message")
+
+    Rel(complaintforge, azureopenai, "Runs AI agents")
+    Rel(complaintforge, langsmith, "Sends LLM traces")
+    Rel(complaintforge, otelcollector, "Sends telemetry")
+
+    Rel(reviewer, complaintforge, "Reviews cases")
+
+    UpdateRelStyle(customer, zendesk, $offsetY="-20", $offsetX="-150")
+    UpdateRelStyle(zendesk, complaintforge, $offsetY="35", $offsetX="-25")
+    UpdateRelStyle(complaintforge, zendesk, $offsetY="-35", $offsetX="25")
+
+    UpdateRelStyle(complaintforge, salesforce, $offsetY="-35", $offsetX="-25")
+    UpdateRelStyle(complaintforge, mailchimp, $offsetY="35", $offsetX="-25")
+    UpdateRelStyle(mailchimp, customer, $offsetY="35", $offsetX="20")
+
+    UpdateRelStyle(complaintforge, azureopenai, $offsetY="-35", $offsetX="25")
+    UpdateRelStyle(complaintforge, langsmith, $offsetY="0", $offsetX="35")
+    UpdateRelStyle(complaintforge, otelcollector, $offsetY="35", $offsetX="25")
+
+    UpdateRelStyle(reviewer, complaintforge, $offsetY="35", $offsetX="-25")
 ```
 
 ---

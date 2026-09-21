@@ -211,6 +211,90 @@ The `@function_trace()` decorator wraps individual functions in their own spans,
 
 ---
 
+## Integrations
+
+ComplaintForge talks to four external systems: Salesforce as the CRM of record, Zendesk as the ticketing layer, Mailchimp Transactional for customer-facing delivery, and the A2A specialist service for escalation review. Each integration lives in its own file under `tools/`, with a deliberate boundary: nothing outside that file knows how the integration works, only what it returns.
+
+### Salesforce
+
+Salesforce is the integration that does the most work. It's used at two separate points in the workflow with completely different purposes.
+
+At the **enrichment stage** (`nodes/customer_context.py`), the tool runs four SOQL queries in sequence against the Salesforce REST API:
+
+1. Find the Contact by email — gives us contact ID, account ID, phone
+2. Fetch the five most recent Cases for that contact — complaint history
+3. Fetch the five most recent Opportunities for the account — customer value context
+4. Find the matched Order by order number, or fall back to the most recent order on the account
+5. Fetch recent Return Orders linked to the account or order
+
+This enriched context flows into every downstream agent as `customer_history`. The Analyzer uses it to flag repeat complaints. The Resolver uses it to weight the resolution. The Policy node uses it to decide whether a matched order exists before approving a refund. A contact not found in Salesforce is not an error — it returns a structured `{"error": "Contact not found"}` that the Policy node catches and escalates.
+
+At the **action stage** (`agents/action_agent.py`), the tool writes back to Salesforce based on the approved resolution:
+
+| Resolution | Salesforce action |
+|---|---|
+| `full_refund` / `partial_refund` | Creates a high-priority Case |
+| `credit` | Creates a standard Case |
+| `replacement` | Creates a Task for the fulfilment team |
+
+Authentication uses the OAuth2 client credentials flow — a short-lived access token is fetched at the start of each call. There's no token caching, which means one extra round-trip per operation, but it avoids stale-token failures and keeps the implementation stateless.
+
+```python
+response = requests.post(
+    SALESFORCE_LOGIN_URL + "/services/oauth2/token",
+    data={
+        "grant_type": "client_credentials",
+        "client_id": SALESFORCE_CLIENT_ID,
+        "client_secret": SALESFORCE_CLIENT_SECRET,
+    },
+)
+access_token, instance_url = payload["access_token"], payload["instance_url"]
+```
+
+SOQL injection is prevented by a `_soql_string()` helper that escapes backslashes and single quotes before interpolating any user-supplied value into a query string. Object and field names from environment variables are validated against an alphanumeric-plus-underscore allowlist before being used in queries.
+
+### Zendesk via MCP
+
+Zendesk ticket updates use the **Model Context Protocol (MCP)** rather than the Zendesk REST API directly. This is the most architecturally interesting integration in the project.
+
+The MCP client (`tools/zendesk_mcp_tool.py`) connects to a remote MCP Streamable HTTP server, negotiates a session, and calls a named tool — `update_ticket` by default, configurable via `ZENDESK_MCP_UPDATE_TICKET_TOOL`. The tool receives ticket ID, target status, the final response text as a comment, and a workflow summary (triage result, resolution, actions taken).
+
+```python
+async with streamable_http_client(ZENDESK_MCP_URL, http_client=http_client) as (read, write, _):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool(ZENDESK_MCP_UPDATE_TICKET_TOOL, arguments=payload)
+```
+
+Using MCP here rather than a direct API call has a concrete benefit: the Zendesk integration can be swapped, extended, or replaced by updating the MCP server — the workflow code doesn't change. Any system that exposes an MCP tool with the right signature can slot in. This pattern is increasingly common in agentic architectures: the agent-facing interface is stable, the implementation behind it is replaceable.
+
+If `ZENDESK_MCP_URL` is not configured, the node skips the update and logs a warning — no exception, no crash. The ticket remains in its pre-workflow state, which is a recoverable situation. If the MCP call fails after the workflow has already executed Salesforce actions, the actions are not rolled back — the system is designed to be eventually consistent, not transactional.
+
+### Mailchimp Transactional
+
+Customer responses are delivered through Mailchimp Transactional (`tools/mailchimp_tool.py`) using the official Python SDK. The integration handles both email and SMS, with SMS as an automatic fallback when email delivery fails permanently.
+
+The key design in this tool is the failure taxonomy. Not all delivery failures are equal:
+
+| Response | Classification | Consequence |
+|---|---|---|
+| `sent` / `queued` | success | Done |
+| `rejected` (4xx Mailchimp error) | `permanent_failure` | Triggers SMS fallback |
+| 5xx / 429 (rate limit) | `transient_failure` | Returned for retry logic upstream |
+
+A permanently-failed email — a bounced address, a domain that doesn't exist, a blocked sender — won't succeed on retry, so triggering SMS immediately is the right call. A transient failure (Mailchimp's servers are momentarily unavailable) is different: retrying makes sense. Collapsing these into a single "error" state would force either always-retry (wasteful on permanent failures) or never-retry (loses valid sends on transient ones).
+
+Emails support an optional `correlation_id` that gets embedded in Mailchimp's metadata field. This enables idempotency checks — if the outbound communication node is re-executed (e.g., after a workflow resume), the same correlation ID prevents a duplicate send from reaching the customer.
+
+```python
+if correlation_id:
+    message["metadata"] = {"correlation_id": correlation_id}
+```
+
+Both `send_email` and `send_sms` return structured dicts rather than raising exceptions. Every failure mode — missing config, missing SDK, rejected send, API exception — produces a `{"status": ..., "provider": "mailchimp", "provider_response": {...}}` payload that the caller can inspect without a try/except. This keeps the communication node's error handling in one place and makes the tool straightforward to test with simple assertions on the return value.
+
+---
+
 ## Deployment
 
 Both services are containerised. The root `Dockerfile` builds the main complaint handler; `a2a_refund_specialist_service/Dockerfile` builds the specialist. `docker-compose.yml` wires them together for local development and integration testing.
@@ -237,6 +321,49 @@ def get_chat_llm(*, temperature: float = 0) -> ChatOpenAI:
         return ChatOpenAI(model=LITELLM_MODEL, base_url=LITELLM_BASE_URL, ...)
     return ChatOpenAI(model=AZURE_OPENAI_DEPLOYMENT_NAME, base_url=_azure_openai_base_url(), ...)
 ```
+
+---
+
+## LiteLLM
+
+LiteLLM is an open-source proxy that presents a unified OpenAI-compatible interface in front of every major LLM provider — Azure OpenAI, Anthropic, Gemini, Mistral, local Ollama, and more. In ComplaintForge, it sits between the application and the model endpoint: the application code stays identical regardless of which provider is behind it.
+
+### Switching models with a single env flag
+
+The integration is minimal by design. Setting `USE_LITELLM=true` and pointing `LITELLM_BASE_URL` at your proxy is enough to redirect every LLM call through it:
+
+```env
+USE_LITELLM=true
+LITELLM_BASE_URL=http://localhost:4000
+LITELLM_API_KEY=sk-1234
+LITELLM_MODEL=gpt-4o-mini
+```
+
+The `llm_factory.py` factory reads these variables and constructs a `ChatOpenAI` client aimed at the proxy instead of Azure directly. No agent code changes required.
+
+This proved useful during development: running the full five-agent workflow against `gpt-4o-mini` for rapid iteration kept costs low, then switching `LITELLM_MODEL` to the production deployment for quality validation. The same mechanism works for testing against Anthropic or a local model without touching the application.
+
+### Spend tracking and budget limits
+
+The most-used LiteLLM feature in this project wasn't the multi-provider routing — it was the built-in **spend tracking and budget controls**.
+
+LiteLLM's proxy maintains a running cost ledger per API key, per virtual team, and per model. Every request is priced at real-world rates and recorded in the proxy's database. The dashboard shows a live cost breakdown: how much each model has consumed, which call patterns are driving the spend, and where the budget is going.
+
+For ComplaintForge — which fires five LLM calls per complaint through triage, analysis, resolution, response drafting, and action planning — this matters. During Locust load tests at 50 concurrent users, per-request cost compounds quickly across model iterations and it's easy to lose track of cumulative spend.
+
+The budget controls close that gap. You attach a `max_budget` and a `budget_duration` to a virtual API key:
+
+```json
+{
+  "max_budget": 10.00,
+  "budget_duration": "1d",
+  "model": "azure/gpt-4o"
+}
+```
+
+Once the key hits its ceiling, the proxy returns a `BudgetExceededError` rather than silently accumulating charges. You can set separate ceilings per environment — tight for local development, higher for staging, alert-only for production — and the proxy enforces them without any application-level logic.
+
+For a workflow with a predictable cost structure (N agents × M tokens per complaint), this made it straightforward to validate the per-complaint unit cost against the business case before scaling the load tests up.
 
 ---
 
